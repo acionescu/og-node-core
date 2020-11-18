@@ -64,11 +64,11 @@ public class Chat {
     }
 
     public RemoteChatPeerData removeRemoteParticipant(String peerId) {
-	participants.remove(peerId);
+	
 	RemoteChatPeerData remotePeer = remoteParticipants.remove(peerId);
 	if (remotePeer != null) {
 	    remotePeersGateways.removeValueForKey(remotePeer.getGatewayPeerId(), peerId);
-
+	    participants.remove(peerId);
 	}
 	return remotePeer;
     }

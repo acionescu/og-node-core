@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.swing.DebugGraphics;
+
 import net.segoia.event.eventbus.CustomEventContext;
 import net.segoia.event.eventbus.Event;
 import net.segoia.event.eventbus.EventHeader;
@@ -379,14 +381,26 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    return false;
 	}
 
+	boolean peerRemoved=false;
+	
 	RemoteChatPeerData remotePeer = chat.removeRemoteParticipant(peerId);
 	String gatewayPeerId = null;
 	if (remotePeer != null) {
 	    gatewayPeerId = remotePeer.getGatewayPeerId();
 	    /* unregister from this remote peer */
 	    context.unregisterFromPeer(peerId);
+	    peerRemoved=true;
 	} else {
-	    chat.removeParticipant(peerId);
+	    ChatPeerData removedParticipant = chat.removeParticipant(peerId);
+	    if(removedParticipant != null) {
+		peerRemoved=true;
+	    }
+	}
+	
+	if(!peerRemoved) {
+	    context.debug("Peer not valid "+peerId);
+	    /* if this wasn't a valid participant just return */
+	    return false;
 	}
 
 	Set<String> ccp = chat.getLocalParticipants();
