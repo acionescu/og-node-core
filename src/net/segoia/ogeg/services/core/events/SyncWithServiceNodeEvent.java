@@ -14,33 +14,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.segoia.ogeg.services.chat.events;
+package net.segoia.ogeg.services.core.events;
 
-public class ChatData {
-    private String chatKey;
+import net.segoia.event.eventbus.CustomEvent;
+import net.segoia.event.eventbus.EventType;
 
-    public ChatData() {
-	super();
+@EventType("NODE:SYNC:SERVICES")
+public class SyncWithServiceNodeEvent extends CustomEvent<ServiceNodeData> {
+    public static final String ET = "NODE:SYNC:SERVICES";
+
+    public SyncWithServiceNodeEvent(ServiceNodeData data) {
+	super(ET, data);
     }
 
-    public ChatData(String chatKey) {
-	super();
-	this.chatKey = chatKey;
+    public SyncWithServiceNodeEvent() {
+	super(ET);
     }
-
-    /**
-     * @return the chatKey
-     */
-    public String getChatKey() {
-	return chatKey;
-    }
-
-    /**
-     * @param chatKey
-     *            the chatKey to set
-     */
-    public void setChatKey(String chatKey) {
-	this.chatKey = chatKey;
-    }
-
 }

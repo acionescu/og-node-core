@@ -14,33 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.segoia.ogeg.services.chat.events;
+package net.segoia.ogeg.services.chat.agents;
 
-public class ChatData {
-    private String chatKey;
-
-    public ChatData() {
-	super();
-    }
-
-    public ChatData(String chatKey) {
-	super();
-	this.chatKey = chatKey;
-    }
-
-    /**
-     * @return the chatKey
-     */
-    public String getChatKey() {
-	return chatKey;
-    }
-
-    /**
-     * @param chatKey
-     *            the chatKey to set
-     */
-    public void setChatKey(String chatKey) {
-	this.chatKey = chatKey;
-    }
-
+public class ChatErrors {
+    public static final ChatError JOIN_REJECTED=new ChatError(10, "Chat join rejected");
 }

@@ -16,31 +16,32 @@
  */
 package net.segoia.ogeg.services.chat.events;
 
-public class ChatData {
-    private String chatKey;
+import net.segoia.ogeg.services.chat.agents.ChatError;
 
-    public ChatData() {
+public class ChatErrorData extends ChatData {
+    private ChatError error;
+    private String reason;
+
+    public ChatErrorData(ChatError error, String reason) {
 	super();
+	this.error = error;
+	this.reason = reason;
     }
 
-    public ChatData(String chatKey) {
-	super();
-	this.chatKey = chatKey;
+    public ChatError getError() {
+	return error;
     }
 
-    /**
-     * @return the chatKey
-     */
-    public String getChatKey() {
-	return chatKey;
+    public void setError(ChatError error) {
+	this.error = error;
     }
 
-    /**
-     * @param chatKey
-     *            the chatKey to set
-     */
-    public void setChatKey(String chatKey) {
-	this.chatKey = chatKey;
+    public String getReason() {
+	return reason;
+    }
+
+    public void setReason(String reason) {
+	this.reason = reason;
     }
 
 }

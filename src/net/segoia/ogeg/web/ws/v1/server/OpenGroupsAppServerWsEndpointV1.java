@@ -1,5 +1,5 @@
 /**
- * og-node - A basic Open Groups node
+ * og-node-core - The core resources of an Open Groups node
  * Copyright (C) 2020  Adrian Cristian Ionescu - https://github.com/acionescu
  *
  * Licensed under the Apache License, Version 2.0 (the "License");

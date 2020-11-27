@@ -16,31 +16,19 @@
  */
 package net.segoia.ogeg.services.chat.events;
 
-public class ChatData {
-    private String chatKey;
+import net.segoia.event.eventbus.CustomEvent;
+import net.segoia.event.eventbus.EventType;
 
-    public ChatData() {
-	super();
+@EventType("PEER:CHAT:ERROR")
+public class ChatErrorEvent extends CustomEvent<ChatErrorData> {
+    public static final String ET = "PEER:CHAT:ERROR";
+
+    public ChatErrorEvent(ChatErrorData data) {
+	super(ET, data);
     }
 
-    public ChatData(String chatKey) {
-	super();
-	this.chatKey = chatKey;
-    }
-
-    /**
-     * @return the chatKey
-     */
-    public String getChatKey() {
-	return chatKey;
-    }
-
-    /**
-     * @param chatKey
-     *            the chatKey to set
-     */
-    public void setChatKey(String chatKey) {
-	this.chatKey = chatKey;
+    public ChatErrorEvent() {
+	super(ET);
     }
 
 }

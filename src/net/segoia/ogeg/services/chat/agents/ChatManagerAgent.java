@@ -1,5 +1,5 @@
 /**
- * og-node - A basic Open Groups node
+ * og-node-core - The core resources of an Open Groups node
  * Copyright (C) 2020  Adrian Cristian Ionescu - https://github.com/acionescu
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,8 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import javax.swing.DebugGraphics;
-
 import net.segoia.event.eventbus.CustomEventContext;
 import net.segoia.event.eventbus.Event;
 import net.segoia.event.eventbus.EventHeader;
@@ -34,6 +32,8 @@ import net.segoia.event.eventbus.peers.LocalAgentEventNodeContext;
 import net.segoia.event.eventbus.peers.events.PeerLeftEvent;
 import net.segoia.event.eventbus.peers.vo.PeerInfo;
 import net.segoia.event.eventbus.vo.services.EventNodePublicServiceDesc;
+import net.segoia.ogeg.services.chat.events.ChatErrorData;
+import net.segoia.ogeg.services.chat.events.ChatErrorEvent;
 import net.segoia.ogeg.services.chat.events.ChatInitData;
 import net.segoia.ogeg.services.chat.events.ChatInitEvent;
 import net.segoia.ogeg.services.chat.events.ChatJoinRequest;
@@ -48,7 +48,7 @@ import net.segoia.ogeg.services.chat.events.ChatServiceDataView;
 import net.segoia.ogeg.services.chat.events.ChatServiceDataViewEvent;
 import net.segoia.ogeg.services.chat.events.RemoteChatPeerData;
 import net.segoia.ogeg.services.core.events.ServiceNodeData;
-import net.segoia.ogeg.services.core.events.ServiceNodeDataEvent;
+import net.segoia.ogeg.services.core.events.SyncWithServiceNodeEvent;
 import net.segoia.util.data.SetMap;
 import net.segoia.util.logging.Logger;
 import net.segoia.util.logging.MasterLogManager;
@@ -89,6 +89,9 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	    PeerLeftEvent event = c.getEvent();
 	    String peerId = (String) event.getData().getPeerId();
+	    
+	    /* remove as interop node */
+	    context.removeInteropPeerId(peerId);
 
 	    if (chatsForGateways.containsKey(peerId)) {
 		/* if this is a gateway peer, remove remote peers using it */
@@ -104,23 +107,33 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    ChatJoinRequest request = event.getData();
 	    String chatKey = request.getChatKey();
 
-	   
-
 	    String newPeerId = event.from();
-	    
+
 	    String alias = request.getAlias();
-	    if(alias == null) {
-		alias=newPeerId;
+	    if (alias == null) {
+		alias = newPeerId;
 	    }
+	    
+	    Chat chatByKey = getChatByKey(chatKey, false);
+	    if(chatByKey != null && chatByKey.hasPeerWithAlias(alias)) {
+		/* There's already a peer with this alias. Send an error to the peer.*/
+		context.forwardTo(new ChatErrorEvent(new ChatErrorData(ChatErrors.JOIN_REJECTED, "Peer with alias "+alias+" already on chat "+chatKey)), newPeerId);
+		if(context.isDebugEnabled()) {
+		    context.debug("Rejectin join request on chat "+chatKey+" for alias "+alias+". Alias already taken.");
+		}
+		/* discard this request */
+		return;
+	    }
+	    
 
 	    ChatPeerData chatPeerData = new ChatPeerData(chatKey, newPeerId, true, alias);
 	    ChatJoinedEvent chatJoinedEvent = new ChatJoinedEvent(chatPeerData);
 	    chatJoinedEvent.addNoForward(newPeerId);
-	    
+
 	    Set<String> localParticipantsSnapshot = getChatByKey(chatKey).getLocalParticipants();
 	    /* notify the current local participants of the new peer */
 	    context.forwardTo(chatJoinedEvent, localParticipantsSnapshot);
-	    
+
 	    /* add the new peer to the participants set */
 
 	    getChatByKey(chatKey).addLocalParicipant(chatPeerData);
@@ -174,7 +187,9 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	    }
 
-	    logger.info("forwarding chat message to local partners" + partnersSnapshot);
+	    if(context.isDebugEnabled()) {
+		context.debug("forwarding chat message to local partners" + partnersSnapshot);
+	    }
 	    /* forward the message to local participants */
 	    context.forwardTo(event, partnersSnapshot);
 
@@ -192,10 +207,13 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	context.addEventHandler(ChatJoinedEvent.class, (c) -> {
 
 	    ChatJoinedEvent event = c.getEvent();
-	    System.out.println("processing chat joined " + event);
+	    
 	    EventHeader header = event.getHeader();
 	    String channel = header.getChannel();
 	    if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
+		/* forward this to interop peers */
+		context.forwardToInteropPeers(event);
+		
 		return;
 	    }
 
@@ -210,6 +228,9 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    EventHeader header = event.getHeader();
 	    String channel = header.getChannel();
 	    if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
+		/* forward this to interop peers */
+		context.forwardToInteropPeers(event);
+		
 		return;
 	    }
 
@@ -220,71 +241,94 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	});
 
 	/* sent state to other service nodes */
-	context.addEventHandler(ServiceNodeDataEvent.class, (c) -> {
+	context.addEventHandler(SyncWithServiceNodeEvent.class, (c) -> {
 	    Collection<EventNodePublicServiceDesc> ourServices = context.getAgentPublicServices().values();
-	    ServiceNodeDataEvent event = c.getEvent();
-	    
-	    if(!event.from().equals(event.getLastRelay())) {
-		/* allow only direct peers */
+	    SyncWithServiceNodeEvent event = c.getEvent();
+
+	    if (!context.isEventLocal(event)) {
+		if(context.isDebugEnabled()) {
+		    context.debug("Rejecting remote service sync event "+event.toJson());
+		}
+		
+		/* allow only local events */
 		return;
 	    }
+	    
+	    /* we need the cause event from the actual peer */
+	    Event causeEvent = event.getCauseEvent();
+	    
+	    if(causeEvent == null) {
+		context.debug("No cause event. Rejecting service sync event "+event.toJson());
+		return;
+	    }
+	    
+	    /* get peer id */
+	    String peerId = causeEvent.from();
+
 	    
 	    ServiceNodeData data = event.getData();
 	    if (data != null) {
 		List<EventNodePublicServiceDesc> remoteServices = data.getServices();
-		EventNodePublicServiceDesc serviceMatch = context.getNodeContext().getServicesManager().getServiceMatch("chatService", ourServices,
-			remoteServices);
-		if(serviceMatch != null) {
+		EventNodePublicServiceDesc serviceMatch = context.getNodeContext().getServicesManager()
+			.getServiceMatch("chatService", ourServices, remoteServices);
+		if (serviceMatch != null) {
 		    /* we're both providing compatible chat services */
+		    
+		    /* add this peer as interop peer */
+		    context.addInteropPeerId(peerId);
+		    
 		    Map<String, ChatInitData> activeChatsData = getActiveChatsData();
-		    if(activeChatsData.size()==0) {
+		    if (activeChatsData.size() == 0) {
 			/* don't send a syncying event if we have no chats */
 			return;
 		    }
-		    
+
 		    ChatServiceDataView chatServiceDataView = new ChatServiceDataView(activeChatsData);
 		    /* send sync event */
-		    context.forwardTo(new ChatServiceDataViewEvent(chatServiceDataView), event.from());
+		    context.forwardTo(new ChatServiceDataViewEvent(chatServiceDataView), peerId);
 		}
 	    }
+	    else if(context.isDebugEnabled()) {
+		context.debug("Discarding sync event with null data");
+	    }
 	});
-	
-	context.addEventHandler(ChatServiceDataViewEvent.class,(c)->{
+
+	context.addEventHandler(ChatServiceDataViewEvent.class, (c) -> {
 	    ChatServiceDataViewEvent event = c.getEvent();
 	    String gatewayPeerId = event.from();
-	    if(!gatewayPeerId.equals(event.getLastRelay())) {
+	    if (!gatewayPeerId.equals(event.getLastRelay())) {
 		/* allow only direct peers */
 		return;
 	    }
-	    
+
 	    ChatServiceDataView data = event.getData();
-	    if(data == null) {
+	    if (data == null) {
 		return;
 	    }
 	    Map<String, ChatInitData> chatsData = data.getChats();
-	    if(chatsData == null) {
+	    if (chatsData == null) {
 		return;
 	    }
-	    
-	    for(ChatInitData cid : chatsData.values()) {
-		for(ChatPeerData cpd : cid.getParticipants()) {
+
+	    for (ChatInitData cid : chatsData.values()) {
+		for (ChatPeerData cpd : cid.getParticipants()) {
 		    addRemoteChatPeer(gatewayPeerId, cpd, event);
 		}
 	    }
-	    
+
 	});
     }
 
-    private Map<String, ChatInitData> getActiveChatsData(){
-	Map<String, ChatInitData> activeChatsMap=new HashMap<>();
-	for(String chatKey : chats.keySet()) {
+    private Map<String, ChatInitData> getActiveChatsData() {
+	Map<String, ChatInitData> activeChatsMap = new HashMap<>();
+	for (String chatKey : chats.keySet()) {
 	    Chat c = getChatByKey(chatKey);
 	    Map<String, ChatPeerData> cp = c.getParticipants();
 	    activeChatsMap.put(chatKey, new ChatInitData(chatKey, new ArrayList(cp.values())));
 	}
 	return activeChatsMap;
     }
-    
+
     private void removeRemotePeer(CustomEventContext<ChatLeftEvent> c) {
 	ChatLeftEvent event = c.getEvent();
 	ChatPeerData data = event.getData();
@@ -300,15 +344,29 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
     private String buildLocalIdForRemotePeer(String gatewayPeerId, String remotePeerId) {
 	return gatewayPeerId + ":" + remotePeerId;
     }
-    
+
     private void addRemoteChatPeer(String gatewayPeerId, ChatPeerData peerData, Event triggerEvent) {
+	String chatKey = peerData.getChatKey();
+	String alias = peerData.getAlias();
+	
+	Chat chatByKey = getChatByKey(chatKey, false);
+	if(chatByKey != null && chatByKey.hasPeerWithAlias(alias)) {
+	    if(context.isDebugEnabled()) {
+		    context.debug("Discarding peer join on chat "+chatKey+" for alias "+alias+". Alias already taken.");
+		}
+		/* discard this request */
+		return;
+	    
+	}
+	
 	/* add a remote peer if none exists */
-	String localPeerId = context.addRemotePeer(gatewayPeerId, new PeerInfo(peerData.getPeerId(), "", null), triggerEvent);
+	String localPeerId = context.addRemotePeer(gatewayPeerId, new PeerInfo(peerData.getPeerId(), "", null),
+		triggerEvent);
 //	String localPeerId = buildLocalIdForRemotePeer(gatewayPeerId, peerData.getPeerId());
 
-	String chatKey = peerData.getChatKey();
+	
 	/* create a peer data with the local peer id */
-	ChatPeerData localPeerData = new ChatPeerData(chatKey, localPeerId, false, peerData.getAlias());
+	ChatPeerData localPeerData = new ChatPeerData(chatKey, localPeerId, false, alias);
 
 	ChatJoinedEvent chatJoinedEvent = new ChatJoinedEvent(localPeerData);
 	/* notify the current local participants of the new peer */
@@ -328,35 +386,13 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
     private void addRemoteChatPeer(CustomEventContext<ChatJoinedEvent> c) {
 	ChatJoinedEvent event = c.getEvent();
-	System.out.println("adding remote participant " + event.toJson());
 
 	ChatPeerData peerData = event.getData();
 
 	/* add a remote peer if none exists */
 	String gatewayPeerId = event.from();
 	addRemoteChatPeer(gatewayPeerId, peerData, event);
-	
-//	String localPeerId = context.addRemotePeer(gatewayPeerId, new PeerInfo(peerData.getPeerId(), "", null), event);
-////	String localPeerId = buildLocalIdForRemotePeer(gatewayPeerId, peerData.getPeerId());
-//
-//	String chatKey = peerData.getChatKey();
-//	/* create a peer data with the local peer id */
-//	ChatPeerData localPeerData = new ChatPeerData(chatKey, localPeerId, false, peerData.getAlias());
-//
-//	ChatJoinedEvent chatJoinedEvent = new ChatJoinedEvent(localPeerData);
-//	/* notify the current local participants of the new peer */
-//	context.forwardTo(chatJoinedEvent, getChatByKey(chatKey).getLocalParticipants());
-//
-//	/* add the peer to the chat local view, specifying the source o the event as a gateway peer */
-//	getChatByKey(chatKey).addRemoteParicipant(new RemoteChatPeerData(localPeerData, gatewayPeerId));
-//	chatsForGateways.add(gatewayPeerId, chatKey);
-//
-//	/* post chat joined event for the remote peer that we added */
-//	ChatJoinedEvent globalChatJoinedEvent = new ChatJoinedEvent(localPeerData);
-//	/* make sure this message is not sent to the gateway */
-//	globalChatJoinedEvent.addNoForward(gatewayPeerId);
-//	event.setAsCauseFor(globalChatJoinedEvent);
-//	context.postEvent(globalChatJoinedEvent);
+
     }
 
     private List<String> setCopy(Collection<String> source) {
@@ -381,24 +417,24 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    return false;
 	}
 
-	boolean peerRemoved=false;
-	
+	boolean peerRemoved = false;
+
 	RemoteChatPeerData remotePeer = chat.removeRemoteParticipant(peerId);
 	String gatewayPeerId = null;
 	if (remotePeer != null) {
 	    gatewayPeerId = remotePeer.getGatewayPeerId();
 	    /* unregister from this remote peer */
 	    context.unregisterFromPeer(peerId);
-	    peerRemoved=true;
+	    peerRemoved = true;
 	} else {
-	    ChatPeerData removedParticipant = chat.removeParticipant(peerId);
-	    if(removedParticipant != null) {
-		peerRemoved=true;
+	    ChatPeerData removedParticipant = chat.removeLocalParticipant(peerId);
+	    if (removedParticipant != null) {
+		peerRemoved = true;
 	    }
 	}
-	
-	if(!peerRemoved) {
-	    context.debug("Peer not valid "+peerId);
+
+	if (!peerRemoved) {
+	    context.debug("Peer not valid " + peerId);
 	    /* if this wasn't a valid participant just return */
 	    return false;
 	}
@@ -433,7 +469,9 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
     }
 
     private void removePeerFromAllChats(String peerId) {
-	logger.info("Removing peer " + peerId + " from chats.");
+	if(context.isDebugEnabled()) {
+	    context.debug("Removing peer " + peerId + " from chats.");
+	}
 	Set<String> chatsToRemove = new HashSet<>();
 	chats.keySet().forEach((chatkey) -> {
 	    boolean toRemove = removePeerFromChat(chatkey, peerId, false, null);

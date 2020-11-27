@@ -1,5 +1,5 @@
 /**
- * og-node - A basic Open Groups node
+ * og-node-core - The core resources of an Open Groups node
  * Copyright (C) 2020  Adrian Cristian Ionescu - https://github.com/acionescu
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,10 +49,6 @@ public class StatusAppStats implements EventContextListener{
     public void onEvent(EventContext ec) {
 	httpStats.onEvent(ec);
 	
-//	HierarchycalStats local = (HierarchycalStats)httpStats.getNestedStats().get("::1");
-//	if(local!= null) {
-//	    System.out.println(local.getNestedStats());
-//	}
 	EventHandle eh = EBus.getHandle(new SimpleStatsEvent(NAME, httpStats));
 	if(eh.isAllowed()) {
 	    eh.post();

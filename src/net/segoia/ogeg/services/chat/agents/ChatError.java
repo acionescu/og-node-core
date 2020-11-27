@@ -14,33 +14,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.segoia.ogeg.services.chat.events;
+package net.segoia.ogeg.services.chat.agents;
 
-public class ChatData {
-    private String chatKey;
+public class ChatError {
+    private int errorCode;
+    private String message;
 
-    public ChatData() {
+    public ChatError(int errorCode, String message) {
+	super();
+	this.errorCode = errorCode;
+	this.message = message;
+    }
+
+    public ChatError() {
 	super();
     }
 
-    public ChatData(String chatKey) {
-	super();
-	this.chatKey = chatKey;
+    public int getErrorCode() {
+	return errorCode;
     }
 
-    /**
-     * @return the chatKey
-     */
-    public String getChatKey() {
-	return chatKey;
+    public void setErrorCode(int errorCode) {
+	this.errorCode = errorCode;
     }
 
-    /**
-     * @param chatKey
-     *            the chatKey to set
-     */
-    public void setChatKey(String chatKey) {
-	this.chatKey = chatKey;
+    public String getMessage() {
+	return message;
+    }
+
+    public void setMessage(String message) {
+	this.message = message;
     }
 
 }

@@ -1,5 +1,5 @@
 /**
- * og-node - A basic Open Groups node
+ * og-node-core - The core resources of an Open Groups node
  * Copyright (C) 2020  Adrian Cristian Ionescu - https://github.com/acionescu
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +16,7 @@
  */
 package net.segoia.ogeg.services.chat.agents;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,9 +28,8 @@ import net.segoia.util.data.SetMap;
 
 public class Chat {
     private String chatKey;
-//    private Set<String> participants = new LinkedHashSet<>();
     private Map<String, ChatPeerData> participants = new LinkedHashMap<>();
-
+    private Map<String,ChatPeerData> participantsByAlias=new HashMap<>();
     private Set<String> localParticipants = new HashSet<>();
     private Map<String, RemoteChatPeerData> remoteParticipants = new LinkedHashMap<>();
 
@@ -41,26 +41,47 @@ public class Chat {
     }
 
     public void addParticipant(ChatPeerData peerData) {
+	String alias = peerData.getAlias();
+	if(hasPeerWithAlias(alias)) {
+	    throw new RuntimeException("Peer with alias "+alias+" already present o chat "+chatKey);
+	}
+	participantsByAlias.put(alias, peerData);
 	participants.put(peerData.getPeerId(), peerData);
+	
+    }
+    
+    public boolean hasPeerWithAlias(String alias) {
+	return participantsByAlias.containsKey(alias);
+    }
+    
+    public ChatPeerData getParticipantByAlias(String alias) {
+	return participantsByAlias.get(alias);
     }
 
     public void addLocalParicipant(ChatPeerData peerData) {
-	String peerId = peerData.getPeerId();
 	addParticipant(peerData);
-	localParticipants.add(peerId);
+	localParticipants.add(peerData.getPeerId());
     }
 
     public void addRemoteParicipant(RemoteChatPeerData peerData) {
 	ChatPeerData chatPeerData = peerData.getPeerData();
-	String peerId = chatPeerData.getPeerId();
 	addParticipant(chatPeerData);
+	String peerId = chatPeerData.getPeerId();
 	remoteParticipants.put(peerId, peerData);
 	remotePeersGateways.add(peerData.getGatewayPeerId(), peerId);
     }
-
+    
     public ChatPeerData removeParticipant(String peerId) {
+	ChatPeerData peerData = participants.remove(peerId);
+	if(peerData != null) {
+	    participantsByAlias.remove(peerData.getAlias());
+	}
+	return peerData;
+    }
+
+    public ChatPeerData removeLocalParticipant(String peerId) {
 	localParticipants.remove(peerId);
-	return participants.remove(peerId);
+	return removeParticipant(peerId);
     }
 
     public RemoteChatPeerData removeRemoteParticipant(String peerId) {
@@ -68,7 +89,7 @@ public class Chat {
 	RemoteChatPeerData remotePeer = remoteParticipants.remove(peerId);
 	if (remotePeer != null) {
 	    remotePeersGateways.removeValueForKey(remotePeer.getGatewayPeerId(), peerId);
-	    participants.remove(peerId);
+	    removeParticipant(peerId);
 	}
 	return remotePeer;
     }
