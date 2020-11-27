@@ -17,8 +17,8 @@
 package net.segoia.ogeg.node.vo.core;
 
 public class PeerNodeSettings {
-    private boolean autoConnect;
-    private boolean autoReconnect;
+    private boolean autoConnect=true;
+    private boolean autoReconnect=true;
     private long reconnectDelay=10000;
 
     public boolean isAutoConnect() {
