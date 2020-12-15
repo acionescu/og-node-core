@@ -22,12 +22,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
+import net.segoia.ogeg.services.chat.events.ChatConfig;
 import net.segoia.ogeg.services.chat.events.ChatPeerData;
 import net.segoia.ogeg.services.chat.events.RemoteChatPeerData;
 import net.segoia.util.data.SetMap;
 
 public class Chat {
     private String chatKey;
+    private ChatConfig config;
+    
     private Map<String, ChatPeerData> participants = new LinkedHashMap<>();
     private Map<String,ChatPeerData> participantsByAlias=new HashMap<>();
     private Set<String> localParticipants = new HashSet<>();
@@ -102,7 +105,7 @@ public class Chat {
 	return remotePeersGateways.keySet();
     }
 
-    public RemoteChatPeerData getRmoteParticipant(String peerId) {
+    public RemoteChatPeerData getRemoteParticipant(String peerId) {
 	return remoteParticipants.get(peerId);
     }
 
@@ -135,6 +138,14 @@ public class Chat {
 
     public void setRemoteParticipants(Map<String, RemoteChatPeerData> remoteParticipants) {
 	this.remoteParticipants = remoteParticipants;
+    }
+
+    public ChatConfig getConfig() {
+        return config;
+    }
+
+    public void setConfig(ChatConfig config) {
+        this.config = config;
     }
 
 }
