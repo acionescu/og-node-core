@@ -16,10 +16,15 @@
  */
 package net.segoia.ogeg.services.chat.events;
 
+import net.segoia.event.eventbus.streaming.events.StreamData;
+
 public class ChatPeerData extends ChatData {
     private String peerId;
     private boolean local;
     private String alias;
+    
+    /* in case the peer is streaming */
+    private StreamData streamData;
 
     public ChatPeerData() {
 	super();
@@ -71,5 +76,13 @@ public class ChatPeerData extends ChatData {
 
     public void setAlias(String alias) {
 	this.alias = alias;
+    }
+
+    public StreamData getStreamData() {
+        return streamData;
+    }
+
+    public void setStreamData(StreamData streamData) {
+        this.streamData = streamData;
     }
 }

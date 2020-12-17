@@ -32,7 +32,7 @@ public class Chat {
     private ChatConfig config;
     
     private Map<String, ChatPeerData> participants = new LinkedHashMap<>();
-    private Map<String,ChatPeerData> participantsByAlias=new HashMap<>();
+    private Map<String, ChatPeerData> participantsByAlias=new HashMap<>();
     private Set<String> localParticipants = new HashSet<>();
     private Map<String, RemoteChatPeerData> remoteParticipants = new LinkedHashMap<>();
 

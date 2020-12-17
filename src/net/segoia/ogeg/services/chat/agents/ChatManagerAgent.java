@@ -473,7 +473,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
     private void handlePeerStreamEnded(CustomEventContext<PeerStreamEndedEvent> c) {
 	PeerStreamEndedEvent event = c.getEvent();
 	PeerStreamEndedData data = event.getData();
-	PeerStreamData peerStreamData = data.getStreamData();
+	PeerStreamData peerStreamData = data.getPeerStreamData();
 	StreamData streamData = peerStreamData.getStreamData();
 	StreamInfo streamInfo = streamData.getStreamInfo();
 	String chatKey = streamInfo.getAppTopicId();
@@ -491,19 +491,24 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	EventHeader header = event.getHeader();
 	String channel = header.getChannel();
 
+	String sourcePeerId = peerStreamData.getSourcePeerId();
+	
+	String chatPeerId=sourcePeerId;
+	String gatewayPeerId=null;
+	
 	if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
 	    
 	}
 	else if(header.getRelayedBy().size() ==1 ) {
 	    /* from a direct peer */
-	    String sourcePeerId = peerStreamData.getSourcePeerId();
-	    String gatewayPeerId = event.from();
+	    
+	    gatewayPeerId = event.getLastRelay();
 	    /* get local id for remote peer */
 	    String localId = context.getIdForRemotePeerByPath(gatewayPeerId, sourcePeerId);
 	    if (localId == null) {
 		return;
 	    }
-
+	    chatPeerId=localId;
 	    /* don't send this back to the source gateway */
 	    event.addNoForward(gatewayPeerId);
 	    
@@ -512,11 +517,23 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    return;
 	}
 	
+	/* remove stream from peer */
+	ChatPeerData chatPeerData = chat.getParticipants().get(chatPeerId);
+	if(chatPeerData != null) {
+	    chatPeerData.setStreamData(null);
+	}
+	
+	/* forward to interop peers */
+	context.forwardTo(event, chat.getRemotePeersGateways());
+	
+	if(gatewayPeerId == null) {
+	    event.addNoForward(sourcePeerId);
+	}
+	
 	/* forward to local participants */
 	context.forwardTo(event, chat.getLocalParticipants());
 
-	/* forward to interop peers */
-	context.forwardTo(event, chat.getRemotePeersGateways());
+	
 
 	
     }
@@ -549,9 +566,12 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	String senderId = event.from();
 
 	RemoteChatPeerData remotePeerData = chat.getRemoteParticipant(event.getLastRelay());
+	
+	ChatPeerData peerData;
 
 	if (remotePeerData != null) {
 	    /* this is a remote peer message */
+	    peerData = remotePeerData.getPeerData();
 
 	} else {
 	    /* direct peer message */
@@ -559,10 +579,18 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    if (!partnersSnapshot.contains(senderId)) {
 		return;
 	    }
+	    
+	    peerData = chat.getParticipants().get(senderId);
 
 //	    /* don't sent the event to the sender */
-//	    event.addNoForward(senderId);
+	    event.addNoForward(senderId);
 
+	}
+	
+	/* store first chunk of data */
+	StreamData streamData = peerData.getStreamData();
+	if(streamData != null && streamData.getStartData() == null) {
+	    streamData.setStartData(data.getData());
 	}
 
 //	if (context.isDebugEnabled()) {
@@ -578,37 +606,43 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	}
 	/* forward message to remote participants */
 	context.forwardTo(event, chat.getRemotePeersGateways());
+	
+	
+	
     }
 
     private void handlePeerStreamStarted(CustomEventContext<PeerStreamStartedEvent> c) {
 	PeerStreamStartedEvent event = c.getEvent();
 	EventHeader header = event.getHeader();
-	PeerStreamData streamData = event.getData();
-	String sourcePeerId = streamData.getSourcePeerId();
-	String streamSessionId = streamData.getStreamData().getStreamSessionId();
+	PeerStreamData peerStreamData = event.getData();
+	String sourcePeerId = peerStreamData.getSourcePeerId();
+	StreamData streamData = peerStreamData.getStreamData();
+	String streamSessionId = streamData.getStreamSessionId();
 
 	String channel = header.getChannel();
+	
+	String chatPeerId=sourcePeerId;
+	String gatewayPeerId=null;
 
 	if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
 	    if (!streamsManager.isStreamSessionValid(streamSessionId)) {
 		return;
 	    }
-
+	    
 	}
 	/* from a direct peer */
 	else if (header.getRelayedBy().size() == 1) {
-	    String gatewayPeerId = event.from();
+	    gatewayPeerId = event.getLastRelay();
 	    /* get local id for remote peer */
 	    String localId = context.getIdForRemotePeerByPath(gatewayPeerId, sourcePeerId);
 	    if (localId == null) {
 		return;
 	    }
-
-	    event.addNoForward(gatewayPeerId);
+	    chatPeerId=localId;
 	}
 
 	/* use the topic as the chat key */
-	String chatKey = streamData.getStreamData().getStreamInfo().getAppTopicId();
+	String chatKey = streamData.getStreamInfo().getAppTopicId();
 	if (chatKey == null) {
 	    return;
 	}
@@ -618,12 +652,27 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	if (chat == null) {
 	    return;
 	}
+	
+	/* add stream data for the peer */
+	ChatPeerData chatPeerData = chat.getParticipants().get(chatPeerId);
+	if(chatPeerData == null) {
+	    return;
+	}
+	chatPeerData.setStreamData(streamData);
 
+	if(gatewayPeerId != null) {
+	    event.addNoForward(gatewayPeerId);
+	}
+	/* forward to gateway peers */
+	context.forwardTo(event, chat.getRemotePeersGateways());
+	
+	if(gatewayPeerId==null) {
+	    event.addNoForward(sourcePeerId);
+	}
+	
 	/* forward to local participants */
 	context.forwardTo(event, chat.getLocalParticipants());
 
-	/* forward to interop peers */
-	context.forwardToInteropPeers(event);
 
     }
 
