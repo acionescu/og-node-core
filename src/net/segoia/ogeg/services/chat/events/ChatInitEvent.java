@@ -16,21 +16,14 @@
  */
 package net.segoia.ogeg.services.chat.events;
 
-import java.util.List;
-
 import net.segoia.event.eventbus.CustomEvent;
 import net.segoia.event.eventbus.EventType;
 
 @EventType("PEER:CHAT:INIT")
 public class ChatInitEvent extends CustomEvent<ChatInitData>{
+    public static final String ET="PEER:CHAT:INIT";
 
     public ChatInitEvent(ChatInitData data) {
-	super(ChatInitEvent.class);
-	this.data=data;
+	super(ET,data);
     }
-    
-    public ChatInitEvent(String chatKey, List<ChatPeerData> participants) {
-	this(new ChatInitData(chatKey, participants));
-    }
-
 }

@@ -20,11 +20,25 @@ import java.util.List;
 
 public class ChatInitData extends ChatData{
     private List<ChatPeerData> participants;
+    private ChatConfig chatConfig;
     
     public ChatInitData(String chatKey, List<ChatPeerData> participants) {
 	super(chatKey);
 	this.participants = participants;
     }
+    
+    public ChatInitData(String chatKey, List<ChatPeerData> participants, ChatConfig chatConfig) {
+	super(chatKey);
+	this.participants = participants;
+	this.chatConfig = chatConfig;
+    }
+
+    public ChatInitData() {
+	super();
+	// TODO Auto-generated constructor stub
+    }
+
+
 
     /**
      * @return the participants

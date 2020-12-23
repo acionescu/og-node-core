@@ -48,6 +48,7 @@ import net.segoia.event.eventbus.streaming.events.StreamInfo;
 import net.segoia.event.eventbus.streaming.events.StreamPacketData;
 import net.segoia.event.eventbus.streaming.events.StreamPacketEvent;
 import net.segoia.event.eventbus.vo.services.EventNodePublicServiceDesc;
+import net.segoia.ogeg.services.chat.events.ChatConfig;
 import net.segoia.ogeg.services.chat.events.ChatErrorData;
 import net.segoia.ogeg.services.chat.events.ChatErrorEvent;
 import net.segoia.ogeg.services.chat.events.ChatInitData;
@@ -140,7 +141,19 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 		alias = newPeerId;
 	    }
 
+	    if (chatKey == null) {
+		/* create a random chat */
+		chatKey = context.genereateNewSessionId(chats);
+	    }
+
 	    Chat chatByKey = getChatByKey(chatKey, false);
+	    
+	    if(chatByKey != null && chatByKey.isFull()) {
+		context.forwardTo(new ChatErrorEvent(new ChatErrorData(ChatErrors.ROOM_CAPACITY_REACHED,
+			ChatErrors.ROOM_CAPACITY_REACHED.getMessage())), newPeerId);
+		return;
+	    }
+	    
 	    if (chatByKey != null && chatByKey.hasPeerWithAlias(alias)) {
 		/* There's already a peer with this alias. Send an error to the peer. */
 		context.forwardTo(new ChatErrorEvent(new ChatErrorData(ChatErrors.JOIN_REJECTED,
@@ -149,7 +162,20 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 		    context.debug("Rejectin join request on chat " + chatKey + " for alias " + alias
 			    + ". Alias already taken.");
 		}
+		
 		/* discard this request */
+		return;
+	    }
+	    
+	    /* check if max available rooms reached */
+	    if(chatByKey==null && (chats.size() >= config.getMaxAllowedRooms())) {
+		/* no more rooms available */
+		context.forwardTo(new ChatErrorEvent(new ChatErrorData(ChatErrors.CHAT_ROOMS_CAPACITY_REACHED,
+			ChatErrors.CHAT_ROOMS_CAPACITY_REACHED.getMessage())), newPeerId);
+		
+		if (context.isDebugEnabled()) {
+		    context.debug("Room capacity reached."+chats.size());
+		}
 		return;
 	    }
 
@@ -157,16 +183,17 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    ChatJoinedEvent chatJoinedEvent = new ChatJoinedEvent(chatPeerData);
 	    chatJoinedEvent.addNoForward(newPeerId);
 
-	    Set<String> localParticipantsSnapshot = getChatByKey(chatKey).getLocalParticipants();
+	    Chat chat = getChatByKey(chatKey);
+	    Set<String> localParticipantsSnapshot = chat.getLocalParticipants();
 	    /* notify the current local participants of the new peer */
 	    context.forwardTo(chatJoinedEvent, localParticipantsSnapshot);
 
 	    /* add the new peer to the participants set */
 
-	    getChatByKey(chatKey).addLocalParicipant(chatPeerData);
+	    chat.addLocalParicipant(chatPeerData);
 
 	    List<ChatPeerData> chatParticipants = createParticipantsCopy(getChatParticipants(chatKey));
-	    ChatInitEvent chatInitEvent = new ChatInitEvent(chatKey, chatParticipants);
+	    ChatInitEvent chatInitEvent = new ChatInitEvent(new ChatInitData(chatKey, chatParticipants,chat.getConfig()));
 	    /* send a chat init event to the new peer */
 	    context.forwardTo(chatInitEvent, newPeerId);
 
@@ -248,8 +275,8 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	context.addEventHandler(PeerStreamStartedEvent.class, (c) -> {
 	    handlePeerStreamStarted(c);
 	});
-	
-	context.addEventHandler(PeerStreamEndedEvent.class, (c)->{
+
+	context.addEventHandler(PeerStreamEndedEvent.class, (c) -> {
 	    handlePeerStreamEnded(c);
 	});
 
@@ -395,7 +422,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	StartStreamRequest data = event.getData();
 
 	context.logDebug("Handling start streqm request");
-	
+
 	if (data == null) {
 	    return;
 	}
@@ -440,10 +467,10 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    context.forwardTo(
 		    new StartStreamRejectedEvent(new StartStreamRejectedData(streamId, ChatConstants.CHAT_KEY_UNKNOWN)),
 		    peerId);
-	    
-	    if(context.isDebugEnabled()) {
-		    context.logDebug("Discarding start stream request. No chat for key "+chatKey);
-		}
+
+	    if (context.isDebugEnabled()) {
+		context.logDebug("Discarding start stream request. No chat for key " + chatKey);
+	    }
 	    return;
 	}
 
@@ -451,14 +478,26 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    /* the peer is not in the chat */
 	    context.forwardTo(new StartStreamRejectedEvent(
 		    new StartStreamRejectedData(streamId, ChatConstants.INVALID_CHAT_USER)), peerId);
-	    
-	    if(context.isDebugEnabled()) {
-		    context.logDebug("Discarding start stream request. Peer "+peerId+" not present in chat "+chatKey);
-		}
+
+	    if (context.isDebugEnabled()) {
+		context.logDebug("Discarding start stream request. Peer " + peerId + " not present in chat " + chatKey);
+	    }
 	    return;
 	}
-
-	if(context.isDebugEnabled()) {
+	
+	if(!chat.getConfig().isStreamingAllowed()) {
+	    context.forwardTo(new StartStreamRejectedEvent(
+		    new StartStreamRejectedData(streamId, ChatConstants.STREAMING_NOT_ALLOWED)), peerId);
+	    return;
+	}
+	
+	if(chat.maximumStreamsReached()) {
+	    context.forwardTo(new StartStreamRejectedEvent(
+		    new StartStreamRejectedData(streamId, ChatConstants.MAX_STREAMS_REACHED)), peerId);
+	    return;
+	}
+	
+	if (context.isDebugEnabled()) {
 	    context.logDebug("Delegating start stream event to streams manager");
 	}
 	/* delegate to the streams manager */
@@ -469,7 +508,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
     private void handleEndStream(CustomEventContext<EndStreamEvent> c) {
 	streamsManager.processEvent(c);
     }
-    
+
     private void handlePeerStreamEnded(CustomEventContext<PeerStreamEndedEvent> c) {
 	PeerStreamEndedEvent event = c.getEvent();
 	PeerStreamEndedData data = event.getData();
@@ -477,65 +516,71 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	StreamData streamData = peerStreamData.getStreamData();
 	StreamInfo streamInfo = streamData.getStreamInfo();
 	String chatKey = streamInfo.getAppTopicId();
-	
-	if(chatKey == null) {
+
+	if (chatKey == null) {
 	    return;
 	}
-	
+
 	Chat chat = getChatByKey(chatKey, false);
-	
-	if(chat == null) {
+
+	if (chat == null) {
 	    return;
 	}
-	
+
 	EventHeader header = event.getHeader();
 	String channel = header.getChannel();
 
 	String sourcePeerId = peerStreamData.getSourcePeerId();
-	
-	String chatPeerId=sourcePeerId;
-	String gatewayPeerId=null;
-	
+
+	String chatPeerId = sourcePeerId;
+	String gatewayPeerId = null;
+
 	if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
-	    
-	}
-	else if(header.getRelayedBy().size() ==1 ) {
+
+	} else if (header.getRelayedBy().size() == 1) {
 	    /* from a direct peer */
-	    
+
 	    gatewayPeerId = event.getLastRelay();
 	    /* get local id for remote peer */
 	    String localId = context.getIdForRemotePeerByPath(gatewayPeerId, sourcePeerId);
 	    if (localId == null) {
 		return;
 	    }
-	    chatPeerId=localId;
-	    /* don't send this back to the source gateway */
-	    event.addNoForward(gatewayPeerId);
-	    
-	}
-	else {
+	    chatPeerId = localId;
+
+	    context.logDebug("removing stream " + streamData.getStreamSessionId() + " for chat peer " + chatPeerId);
+	    /* remove the stream for this remote peer */
+	    streamsManager.removeStream(streamData.getStreamSessionId(), data.getReason(), event);
+
+	} else {
 	    return;
 	}
-	
+
 	/* remove stream from peer */
 	ChatPeerData chatPeerData = chat.getParticipants().get(chatPeerId);
-	if(chatPeerData != null) {
+	if (chatPeerData != null) {
 	    chatPeerData.setStreamData(null);
 	}
-	
+
+	PeerStreamEndedEvent globalStreamEndedEvent = event;
+
+	if (gatewayPeerId != null) {
+	    globalStreamEndedEvent = new PeerStreamEndedEvent(
+		    new PeerStreamEndedData(new PeerStreamData(chatPeerId, streamData), data.getReason()));
+	    globalStreamEndedEvent.addNoForward(gatewayPeerId);
+	}
+
 	/* forward to interop peers */
-	context.forwardTo(event, chat.getRemotePeersGateways());
-	
-	if(gatewayPeerId == null) {
+	context.forwardTo(globalStreamEndedEvent, chat.getRemotePeersGateways());
+
+	if (gatewayPeerId == null) {
+
 	    event.addNoForward(sourcePeerId);
 	}
-	
+
 	/* forward to local participants */
 	context.forwardTo(event, chat.getLocalParticipants());
 
-	
-
-	
     }
 
     private void handleStreamPacket(CustomEventContext<StreamPacketEvent> c) {
@@ -544,13 +589,13 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	String streamSessionId = data.getStreamSessionId();
 
 	StreamContext sc = streamsManager.getStreamDataBySession(streamSessionId);
-	if(sc == null) {
-	    if(context.isDebugEnabled()) {
-		context.debug("Discarding stream packet. No session for "+streamSessionId);
+	if (sc == null) {
+	    if (context.isDebugEnabled()) {
+		context.debug("Discarding stream packet. No session for " + streamSessionId);
 	    }
 	    return;
 	}
-	
+
 	String chatKey = sc.getStreamInfo().getAppTopicId();
 
 	/* use app topic to identify the chat */
@@ -566,7 +611,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	String senderId = event.from();
 
 	RemoteChatPeerData remotePeerData = chat.getRemoteParticipant(event.getLastRelay());
-	
+
 	ChatPeerData peerData;
 
 	if (remotePeerData != null) {
@@ -575,21 +620,20 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	} else {
 	    /* direct peer message */
-	    /* check if the sender is in the chat */
-	    if (!partnersSnapshot.contains(senderId)) {
+
+	    peerData = chat.getParticipants().get(senderId);
+	    if (peerData == null) {
 		return;
 	    }
-	    
-	    peerData = chat.getParticipants().get(senderId);
 
 //	    /* don't sent the event to the sender */
 	    event.addNoForward(senderId);
 
 	}
-	
-	/* store first chunk of data */
+
+	/* store first chunk of stream data */
 	StreamData streamData = peerData.getStreamData();
-	if(streamData != null && streamData.getStartData() == null) {
+	if (streamData != null && streamData.getStartData() == null) {
 	    streamData.setStartData(data.getData());
 	}
 
@@ -606,9 +650,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	}
 	/* forward message to remote participants */
 	context.forwardTo(event, chat.getRemotePeersGateways());
-	
-	
-	
+
     }
 
     private void handlePeerStreamStarted(CustomEventContext<PeerStreamStartedEvent> c) {
@@ -620,15 +662,15 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	String streamSessionId = streamData.getStreamSessionId();
 
 	String channel = header.getChannel();
-	
-	String chatPeerId=sourcePeerId;
-	String gatewayPeerId=null;
+
+	String chatPeerId = sourcePeerId;
+	String gatewayPeerId = null;
 
 	if (LocalAgentEventNodeContext.LOCAL.equals(channel)) {
 	    if (!streamsManager.isStreamSessionValid(streamSessionId)) {
 		return;
 	    }
-	    
+
 	}
 	/* from a direct peer */
 	else if (header.getRelayedBy().size() == 1) {
@@ -638,7 +680,8 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    if (localId == null) {
 		return;
 	    }
-	    chatPeerId=localId;
+	    chatPeerId = localId;
+
 	}
 
 	/* use the topic as the chat key */
@@ -652,27 +695,34 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	if (chat == null) {
 	    return;
 	}
-	
+
 	/* add stream data for the peer */
 	ChatPeerData chatPeerData = chat.getParticipants().get(chatPeerId);
-	if(chatPeerData == null) {
+	if (chatPeerData == null) {
 	    return;
 	}
 	chatPeerData.setStreamData(streamData);
 
-	if(gatewayPeerId != null) {
-	    event.addNoForward(gatewayPeerId);
+	PeerStreamStartedEvent globalPeerStreamStartedEvent = event;
+
+	if (gatewayPeerId != null) {
+	    /* if this is a remote event, create a new peer strea started event with our local id for the remote peer */
+	    globalPeerStreamStartedEvent = new PeerStreamStartedEvent(new PeerStreamData(chatPeerId, streamData));
+
+	    /* don't send back to the gateway */
+	    globalPeerStreamStartedEvent.addNoForward(gatewayPeerId);
+	    /* associate this stream session to the remote peer */
+	    streamsManager.addRemotePeerStream(chatPeerId, streamData);
 	}
 	/* forward to gateway peers */
-	context.forwardTo(event, chat.getRemotePeersGateways());
-	
-	if(gatewayPeerId==null) {
+	context.forwardTo(globalPeerStreamStartedEvent, chat.getRemotePeersGateways());
+
+	if (gatewayPeerId == null) {
 	    event.addNoForward(sourcePeerId);
 	}
-	
+
 	/* forward to local participants */
 	context.forwardTo(event, chat.getLocalParticipants());
-
 
     }
 
@@ -681,7 +731,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	for (String chatKey : chats.keySet()) {
 	    Chat c = getChatByKey(chatKey);
 	    Map<String, ChatPeerData> cp = c.getParticipants();
-	    activeChatsMap.put(chatKey, new ChatInitData(chatKey, new ArrayList(cp.values())));
+	    activeChatsMap.put(chatKey, new ChatInitData(chatKey, new ArrayList(cp.values()),c.getConfig()));
 	}
 	return activeChatsMap;
     }
@@ -881,10 +931,29 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
     }
 
     private Chat createChatForKey(String chatKey) {
-	return new Chat(chatKey);
+	context.logDebug("Creating chat for key "+chatKey);
+	Chat newChat = new Chat(chatKey);
+	Map<String, ChatConfig> configsForChats = config.getConfigsForChats();
+	if (configsForChats != null) {
+	    /* if there's a predefined configuration for this chat, use that */
+	    ChatConfig chatConfig = configsForChats.get(chatKey);
+	    if (chatConfig != null) {
+		newChat.setConfig(chatConfig);
+	    }
+	    else {
+		/* copy default config */
+		ChatConfig ncc = newChat.getConfig();
+		ChatConfig dcc = config.getDefaultChatConfig();
+		ncc.setMaxRoomCapacity(dcc.getMaxRoomCapacity());
+		ncc.setMaxStreamsAllowed(dcc.getMaxStreamsAllowed());
+		ncc.setStreamingAllowed(dcc.isStreamingAllowed());
+	    }
+	}
+	return newChat;
     }
 
     private Chat removeChat(String chatKey) {
+	context.logDebug("Removing chat for key "+chatKey);
 	return chats.remove(chatKey);
     }
 

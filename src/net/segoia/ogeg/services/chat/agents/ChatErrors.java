@@ -18,4 +18,6 @@ package net.segoia.ogeg.services.chat.agents;
 
 public class ChatErrors {
     public static final ChatError JOIN_REJECTED=new ChatError(10, "Chat join rejected");
+    public static final ChatError CHAT_ROOMS_CAPACITY_REACHED=new ChatError(20, "No more chat rooms available. Try again later.");
+    public static final ChatError ROOM_CAPACITY_REACHED=new ChatError(30, "The room is full. Try again later.");
 }

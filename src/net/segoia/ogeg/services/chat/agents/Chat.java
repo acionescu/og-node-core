@@ -29,7 +29,7 @@ import net.segoia.util.data.SetMap;
 
 public class Chat {
     private String chatKey;
-    private ChatConfig config;
+    private ChatConfig config=new ChatConfig();
     
     private Map<String, ChatPeerData> participants = new LinkedHashMap<>();
     private Map<String, ChatPeerData> participantsByAlias=new HashMap<>();
@@ -138,6 +138,28 @@ public class Chat {
 
     public void setRemoteParticipants(Map<String, RemoteChatPeerData> remoteParticipants) {
 	this.remoteParticipants = remoteParticipants;
+    }
+    
+    /**
+     * Checks if this chat reache maximum allowed participants
+     * @return
+     */
+    public boolean isFull() {
+	return participants.size() >= config.getMaxRoomCapacity();
+    }
+    
+    public int getActiveStreamsCount() {
+	int activeStreams=0;
+	for(ChatPeerData cpd : participants.values()) {
+	    if(cpd.getStreamData() != null) {
+		activeStreams++;
+	    }
+	}
+	return activeStreams;
+    }
+    
+    public boolean maximumStreamsReached() {
+	return getActiveStreamsCount() >= config.getMaxStreamsAllowed();
     }
 
     public ChatConfig getConfig() {
