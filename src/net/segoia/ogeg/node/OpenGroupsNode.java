@@ -16,7 +16,6 @@
  */
 package net.segoia.ogeg.node;
 
-import net.segoia.event.eventbus.EBusVM;
 import net.segoia.event.eventbus.Event;
 import net.segoia.event.eventbus.agents.GlobalAgentRegisterRequest;
 import net.segoia.event.eventbus.agents.LocalAgentRegisterRequest;

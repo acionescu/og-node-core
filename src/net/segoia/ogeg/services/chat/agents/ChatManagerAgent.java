@@ -436,21 +436,15 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	String peerId = event.from();
 
-	/* verify that this event was sent by a valid chat peer */
+	
 	String appId = streamInfo.getAppId();
-	if (appId == null) {
-	    /* disregard this if no app id is specified */
-	    context.forwardTo(
-		    new StartStreamRejectedEvent(new StartStreamRejectedData(streamId, ChatConstants.APP_ID_MISSING)),
-		    peerId);
-	    return;
-	} else if (!ChatConstants.CHAT_APP_ID.equals(appId)) {
-	    /* app id not matching */
-	    context.forwardTo(
-		    new StartStreamRejectedEvent(new StartStreamRejectedData(streamId, ChatConstants.APP_ID_UNKNOWN)),
-		    peerId);
+	if (!ChatConstants.CHAT_APP_ID.equals(appId)) {
+	    /* if this wasn not sent to this app, disregard it */
 	    return;
 	}
+	
+	/* mark the event as handled by us */
+	event.setHandled();
 
 	String chatKey = streamInfo.getAppTopicId();
 	if (chatKey == null) {
@@ -473,7 +467,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 	    }
 	    return;
 	}
-
+	/* verify that this event was sent by a valid chat peer */
 	if (!chat.getLocalParticipants().contains(peerId)) {
 	    /* the peer is not in the chat */
 	    context.forwardTo(new StartStreamRejectedEvent(
