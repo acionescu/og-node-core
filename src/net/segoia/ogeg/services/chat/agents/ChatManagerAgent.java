@@ -544,7 +544,7 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	    context.logDebug("removing stream " + streamData.getStreamSessionId() + " for chat peer " + chatPeerId);
 	    /* remove the stream for this remote peer */
-	    streamsManager.removeStream(streamData.getStreamSessionId(), data.getReason(), event);
+	    streamsManager.removeStream(streamData.getStreamSessionId(), data.getReason(), c);
 
 	} else {
 	    return;
@@ -584,9 +584,9 @@ public class ChatManagerAgent extends GlobalEventNodeAgent {
 
 	StreamContext sc = streamsManager.getStreamDataBySession(streamSessionId);
 	if (sc == null) {
-	    if (context.isDebugEnabled()) {
-		context.debug("Discarding stream packet. No session for " + streamSessionId);
-	    }
+//	    if (context.isDebugEnabled()) {
+//		context.debug(this.context.getId()+ " Discarding stream packet. No session for " + streamSessionId);
+//	    }
 	    return;
 	}
 

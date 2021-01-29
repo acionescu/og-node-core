@@ -7,13 +7,18 @@ import net.segoia.event.eventbus.CustomEventContext;
 import net.segoia.event.eventbus.app.EventNodeControllerContext;
 import net.segoia.event.eventbus.peers.GlobalEventNodeAgent;
 import net.segoia.event.eventbus.streaming.CustomStreamControllerContext;
+import net.segoia.event.eventbus.streaming.StreamConstants;
 import net.segoia.event.eventbus.streaming.StreamsManager;
 import net.segoia.event.eventbus.streaming.WriteStreamController;
+import net.segoia.event.eventbus.streaming.events.EndStreamEvent;
+import net.segoia.event.eventbus.streaming.events.PeerStreamEndedData;
+import net.segoia.event.eventbus.streaming.events.PeerStreamEndedEvent;
 import net.segoia.event.eventbus.streaming.events.StartStreamRejectedData;
 import net.segoia.event.eventbus.streaming.events.StartStreamRejectedEvent;
 import net.segoia.event.eventbus.streaming.events.StartStreamRequest;
 import net.segoia.event.eventbus.streaming.events.StartStreamRequestEvent;
 import net.segoia.event.eventbus.streaming.events.StreamInfo;
+import net.segoia.event.eventbus.streaming.events.StreamPacketEvent;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequest;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequestEvent;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesListData;
@@ -60,6 +65,47 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    handleStartStreamRequest(c);
 	});
 
+	context.addEventHandler(StreamPacketEvent.class, (c) -> {
+	    handleStreamPacket(c);
+	});
+
+	context.addEventHandler(EndStreamEvent.class, (c) -> {
+	    handleStreamEnd(c);
+	});
+
+	context.addEventHandler(PeerStreamEndedEvent.class, (c) -> {
+	    handlePeerStreamEnded(c);
+	});
+
+    }
+
+    protected void handlePeerStreamEnded(CustomEventContext<PeerStreamEndedEvent> c) {
+	PeerStreamEndedEvent event = c.getEvent();
+	if (!context.isEventLocal(event)) {
+	    /* we're only interested in local events */
+	    return;
+	}
+	PeerStreamEndedData data = event.getData();
+
+	if (data.getReason().getCode() != StreamConstants.PEER_LEFT.getCode()) {
+	    /* we're tracking cases when that user left in a middle of a stream upload, so we can cleanup */
+	    return;
+	}
+
+	StreamInfo streamInfo = data.getPeerStreamData().getStreamData().getStreamInfo();
+
+	String appId = streamInfo.getAppId();
+	if (!StorageManagerConstants.STORAGE_APP_ID.equals(appId)) {
+	    /* if the stream is not manged by us, do nothing */
+	    return;
+	}
+
+	if(context.isDebugEnabled()) {
+	    context.debug("Deleting file "+streamInfo.getStreamId() +" as peer left withouth finishing the upload.");
+	}
+	
+	/* remove the unfinished file */
+	agentContext.getMainDataStore().delete(streamInfo.getStreamId());
     }
 
     protected void handleListStorageEntities(CustomEventContext<ListStorageEntitiesRequestEvent> c) {
@@ -71,7 +117,7 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	}
 
 	String path = data.getPath();
-System.out.println("listing path "+path);
+	System.out.println("listing path " + path);
 	/* if the path is empty use main data store, otherwise get the datastore indicated by the path */
 	DataStore targetDataStore = agentContext.getMainDataStore();
 
@@ -88,13 +134,14 @@ System.out.println("listing path "+path);
 	}
 
 	StorageEntity[] entitiesArray = targetDataStore.listEntities();
-	System.out.println("entities for path "+entitiesArray);
-	//TODO check list conditions for each entities
-	
-	StorageEntitiesListDataEvent responseEvent = new StorageEntitiesListDataEvent(new StorageEntitiesListData(path, Arrays.asList(entitiesArray), entitiesArray.length));
-	
+	System.out.println("entities for path " + entitiesArray);
+	// TODO check list conditions for each entities
+
+	StorageEntitiesListDataEvent responseEvent = new StorageEntitiesListDataEvent(
+		new StorageEntitiesListData(path, Arrays.asList(entitiesArray), entitiesArray.length));
+
 	context.forwardTo(responseEvent, peerId);
-	
+
     }
 
     /**
@@ -171,36 +218,35 @@ System.out.println("listing path "+path);
 	    return;
 	}
 
-	try {
-	    /* create the leaf file */
-	    OutputStream outputStream = mainDataStore.createLeaf(streamId);
-
-	    /* if file creation succeeded, create a stream controller */
-
-	    WriteStreamController writeStreamController = new WriteStreamController(outputStream);
-
-	    /* add controller as local data on the event */
-
-	    c.addLocalData(new CustomStreamControllerContext(writeStreamController));
-
-	    /* delegate event to streams manager */
-
-	    streamsManager.processEvent(c);
-
-	} catch (StorageEntityExistsException e) {
+	/* if the file exists, send error */
+	if (mainDataStore.exists(streamId)) {
 	    context.forwardTo(
 		    new StartStreamRejectedEvent(
 			    new StartStreamRejectedData(streamId, StorageManagerConstants.STORAGE_ENTITY_EXISTS)),
 		    peerId);
 	    return;
-	} catch (StorageException e) {
-	    context.forwardTo(
-		    new StartStreamRejectedEvent(
-			    new StartStreamRejectedData(streamId, StorageManagerConstants.STORAGE_PATH_INVALID)),
-		    peerId);
-	    return;
 	}
 
+	/* if file creation succeeded, create a stream controller */
+
+	WriteStreamController writeStreamController = new StorageWriteController(mainDataStore, streamId);
+
+	/* add controller as local data on the event */
+
+	c.addLocalData(new CustomStreamControllerContext(writeStreamController));
+
+	/* delegate event to streams manager */
+
+	streamsManager.processEvent(c);
+
+    }
+
+    public void handleStreamPacket(CustomEventContext<StreamPacketEvent> c) {
+	streamsManager.processEvent(c);
+    }
+
+    public void handleStreamEnd(CustomEventContext<EndStreamEvent> c) {
+	streamsManager.processEvent(c);
     }
 
 }
