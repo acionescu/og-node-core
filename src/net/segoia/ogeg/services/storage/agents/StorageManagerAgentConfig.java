@@ -24,7 +24,7 @@ public class StorageManagerAgentConfig {
     /**
      * Maximum characters length of a key
      */
-    private int maxKeyLength=20;
+    private int maxKeyLength=100;
 
     /**
      * The main datastores that this agent manages

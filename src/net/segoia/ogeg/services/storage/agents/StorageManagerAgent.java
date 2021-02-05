@@ -1,11 +1,14 @@
 package net.segoia.ogeg.services.storage.agents;
 
-import java.io.OutputStream;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import net.segoia.event.eventbus.CustomEventContext;
 import net.segoia.event.eventbus.app.EventNodeControllerContext;
 import net.segoia.event.eventbus.peers.GlobalEventNodeAgent;
+import net.segoia.event.eventbus.peers.events.GenericResponseEvent;
 import net.segoia.event.eventbus.streaming.CustomStreamControllerContext;
 import net.segoia.event.eventbus.streaming.StreamConstants;
 import net.segoia.event.eventbus.streaming.StreamsManager;
@@ -21,11 +24,16 @@ import net.segoia.event.eventbus.streaming.events.StreamInfo;
 import net.segoia.event.eventbus.streaming.events.StreamPacketEvent;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequest;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequestEvent;
+import net.segoia.ogeg.services.storage.events.StorageDownloadRequest;
+import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequest;
+import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequestEvent;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesListData;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesListDataEvent;
+import net.segoia.ogeg.services.storage.events.SyncStorageDownloadRequestEvent;
+import net.segoia.ogeg.services.storage.events.SyncStorageDownloadResponse;
 import net.segoia.util.data.storage.DataStore;
 import net.segoia.util.data.storage.StorageEntity;
-import net.segoia.util.data.storage.StorageEntityExistsException;
+import net.segoia.util.data.storage.StorageEntityInfo;
 import net.segoia.util.data.storage.StorageException;
 
 public class StorageManagerAgent extends GlobalEventNodeAgent {
@@ -77,6 +85,62 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    handlePeerStreamEnded(c);
 	});
 
+	/* sync download request */
+	context.addEventHandler(SyncStorageDownloadRequestEvent.class, (c) -> {
+	    handleSyncDownloadRequest(c);
+	});
+
+	/* delete request */
+	context.addEventHandler(StorageEntitiesDeleteRequestEvent.class, (c) -> {
+	    handleDeleteRequest(c);
+	});
+
+    }
+
+    protected void handleSyncDownloadRequest(CustomEventContext<SyncStorageDownloadRequestEvent> c) {
+	SyncStorageDownloadRequestEvent event = c.getEvent();
+
+	if (!context.isEventLocal(event)) {
+	    /* we're only interested in local events */
+	    return;
+	}
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+	;
+
+	StorageDownloadRequest data = event.getData();
+
+	List<String> paths = data.getPaths();
+
+	if (paths == null || paths.size() == 0) {
+	    /* since this is a sync event, add response as local data */
+	    c.addLocalData(new SyncStorageDownloadResponse(StorageManagerConstants.STORAGE_DOWNLOAD_PATH_MISSING));
+	    return;
+	}
+
+	Map<String, StorageEntity> storageEntities = new HashMap<>();
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+	for (String path : paths) {
+	    try {
+		StorageEntity se = mainDataStore.getStorageEntity(path);
+
+		storageEntities.put(path, se);
+	    } catch (Exception e) {
+		e.printStackTrace();
+
+		/* respond with an error */
+		c.addLocalData(new SyncStorageDownloadResponse(
+			StorageManagerConstants.buildDownloadPathNotFoundErrorEvent(path)));
+		return;
+	    }
+	}
+
+	/* if all requested paths were found, add them on response */
+
+	c.addLocalData(new SyncStorageDownloadResponse(storageEntities));
     }
 
     protected void handlePeerStreamEnded(CustomEventContext<PeerStreamEndedEvent> c) {
@@ -86,6 +150,15 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    return;
 	}
 	PeerStreamEndedData data = event.getData();
+	
+	if(data.getReason().getCode() == 0) {
+	    /* if ended successfully, send a notification */
+	    GenericResponseEvent sev = StorageManagerConstants.buildStorageSuccessEvent(EndStreamEvent.ET, StorageManagerConstants.STORAGE_UPLOAD_SUCCEEDED);
+	    sev.addParam("streamSessionId", data.getPeerStreamData().getStreamData().getStreamSessionId());
+	    context.forwardTo(sev, data.getPeerStreamData().getSourcePeerId());
+	    
+	    return;	    
+	}
 
 	if (data.getReason().getCode() != StreamConstants.PEER_LEFT.getCode()) {
 	    /* we're tracking cases when that user left in a middle of a stream upload, so we can cleanup */
@@ -100,10 +173,10 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    return;
 	}
 
-	if(context.isDebugEnabled()) {
-	    context.debug("Deleting file "+streamInfo.getStreamId() +" as peer left withouth finishing the upload.");
+	if (context.isDebugEnabled()) {
+	    context.debug("Deleting file " + streamInfo.getStreamId() + " as peer left withouth finishing the upload.");
 	}
-	
+
 	/* remove the unfinished file */
 	agentContext.getMainDataStore().delete(streamInfo.getStreamId());
     }
@@ -128,12 +201,12 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 		targetDataStore = (DataStore) targetDataStore.getStorage(path);
 	    } catch (StorageException e) {
 		/* send an invalid path error */
-		context.forwardTo(StorageManagerConstants.builPathInvalidErrorEvent(event.getEt()), peerId);
+		context.forwardTo(StorageManagerConstants.buildPathInvalidErrorEvent(event.getEt()), peerId);
 		return;
 	    }
 	}
 
-	StorageEntity[] entitiesArray = targetDataStore.listEntities();
+	StorageEntityInfo[] entitiesArray = targetDataStore.listEntities();
 	System.out.println("entities for path " + entitiesArray);
 	// TODO check list conditions for each entities
 
@@ -247,6 +320,62 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 
     public void handleStreamEnd(CustomEventContext<EndStreamEvent> c) {
 	streamsManager.processEvent(c);
+    }
+
+    public void handleDeleteRequest(CustomEventContext<StorageEntitiesDeleteRequestEvent> c) {
+	StorageEntitiesDeleteRequestEvent event = c.getEvent();
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+
+	StorageEntitiesDeleteRequest data = event.getData();
+
+	List<String> paths = data.getPaths();
+
+	String peerId = event.from();
+
+	if (paths == null || paths.size() == 0) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_DELETE_PATH_MISSING), peerId);
+	    return;
+	}
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+
+	Map<String, DataStoreContext> dataStoreContexts = agentContext.getDataStoreContexts();
+	if (dataStoreContexts != null && dataStoreContexts.size() > 0) {
+	    /* check that the user is not trying to delete a predefined datastore */
+
+	    for (String path : paths) {
+		try {
+		    String relPath = mainDataStore.getRelativePath(path);
+		    for (DataStoreContext dsc : dataStoreContexts.values()) {
+			if(relPath.equals(dsc.getRelativePath())) {
+			    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+				    StorageManagerConstants.STORAGE_DELETE_FORBIDDEN), peerId);
+			    return;
+			}
+		    }
+		} catch (StorageException e) {
+		    context.forwardTo(StorageManagerConstants.buildPathInvalidErrorEvent(event.getEt()), peerId);
+		    return;
+		}
+	    }
+
+	}
+
+	for (String path : paths) {
+	    boolean deleted = mainDataStore.delete(path);
+	    if(!deleted) {
+		 context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			    StorageManagerConstants.STORAGE_DELETE_FAILED), peerId);
+		    return;
+	    }
+	}
+	
+	context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_DELETE_SUCCEEDED), peerId);
     }
 
 }
