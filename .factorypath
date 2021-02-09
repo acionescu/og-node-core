@@ -1,0 +1,4 @@
+<factorypath>
+    <factorypathentry kind="WKSPJAR" id="/eventbus-commons/target/eventbus-commons-0.0.2-SNAPSHOT.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="WKSPJAR" id="/event-bus/target/event-bus-0.0.2-SNAPSHOT.jar" enabled="true" runInBatchMode="false"/>
+</factorypath>

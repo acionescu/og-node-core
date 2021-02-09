@@ -14,37 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.segoia.ogeg.services.storage.events;
+package net.segoia.ogeg.test;
 
-import java.util.Arrays;
-import java.util.List;
+import net.segoia.event.eventbus.EventType;
+import net.segoia.event.eventbus.annotations.EventDataType;
 
-public class StorageDownloadRequest {
-    /**
-     * The paths of files to be downloaded
-     */
-    private List<String> paths;
-    
-    public StorageDownloadRequest(String... paths) {
-	this(Arrays.asList(paths));
-    }
-    
-
-    public StorageDownloadRequest(List<String> paths) {
-	super();
-	this.paths = paths;
-    }
-
-    public StorageDownloadRequest() {
-	super();
-	// TODO Auto-generated constructor stub
-    }
-
-    public List<String> getPaths() {
-        return paths;
-    }
-
-    public void setPaths(List<String> paths) {
-        this.paths = paths;
-    }
+@EventDataType( @EventType("test:event:test") )
+public class TestEventData {
+    private String prop1;
 }

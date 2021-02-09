@@ -16,35 +16,37 @@
  */
 package net.segoia.ogeg.services.storage.events;
 
-import java.util.Arrays;
-import java.util.List;
+public class CreateFolderRequest {
+    /* The path of th parent where the folder should be created */
+    private String path;
 
-public class StorageDownloadRequest {
-    /**
-     * The paths of files to be downloaded
-     */
-    private List<String> paths;
-    
-    public StorageDownloadRequest(String... paths) {
-	this(Arrays.asList(paths));
-    }
-    
+    private String folderName;
 
-    public StorageDownloadRequest(List<String> paths) {
+    public CreateFolderRequest(String path, String folderName) {
 	super();
-	this.paths = paths;
+	this.path = path;
+	this.folderName = folderName;
     }
 
-    public StorageDownloadRequest() {
+    public CreateFolderRequest() {
 	super();
 	// TODO Auto-generated constructor stub
     }
 
-    public List<String> getPaths() {
-        return paths;
+    public String getPath() {
+	return path;
     }
 
-    public void setPaths(List<String> paths) {
-        this.paths = paths;
+    public void setPath(String path) {
+	this.path = path;
     }
+
+    public String getFolderName() {
+	return folderName;
+    }
+
+    public void setFolderName(String folderName) {
+	this.folderName = folderName;
+    }
+
 }

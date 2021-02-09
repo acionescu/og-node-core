@@ -16,35 +16,30 @@
  */
 package net.segoia.ogeg.services.storage.events;
 
-import java.util.Arrays;
-import java.util.List;
+import net.segoia.event.eventbus.CustomEvent;
+import net.segoia.event.eventbus.EventType;
 
-public class StorageDownloadRequest {
-    /**
-     * The paths of files to be downloaded
-     */
-    private List<String> paths;
-    
-    public StorageDownloadRequest(String... paths) {
-	this(Arrays.asList(paths));
+@EventType("STORAGE:CREATE:FOLDER")
+public class CreateFolderRequestEvent extends CustomEvent<CreateFolderRequest>{
+    public static final String ET="STORAGE:CREATE:FOLDER";
+
+    public CreateFolderRequestEvent(CreateFolderRequest data) {
+	super(ET, data);
     }
     
-
-    public StorageDownloadRequest(List<String> paths) {
-	super();
-	this.paths = paths;
+    public CreateFolderRequestEvent() {
+	super(ET);
     }
 
-    public StorageDownloadRequest() {
-	super();
-	// TODO Auto-generated constructor stub
+    @Override
+    public CreateFolderRequest getData() {
+	// TODO Auto-generated method stub
+	return super.getData();
     }
 
-    public List<String> getPaths() {
-        return paths;
-    }
-
-    public void setPaths(List<String> paths) {
-        this.paths = paths;
+    @Override
+    public void setData(CreateFolderRequest data) {
+	// TODO Auto-generated method stub
+	super.setData(data);
     }
 }

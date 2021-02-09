@@ -1,3 +1,19 @@
+/**
+ * og-node-core - The core resources of an Open Groups node
+ * Copyright (C) 2020  Adrian Cristian Ionescu - https://github.com/acionescu
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package net.segoia.ogeg.services.storage.agents;
 
 import java.util.Arrays;
@@ -6,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import net.segoia.event.eventbus.CustomEventContext;
+import net.segoia.event.eventbus.Event;
 import net.segoia.event.eventbus.app.EventNodeControllerContext;
 import net.segoia.event.eventbus.peers.GlobalEventNodeAgent;
 import net.segoia.event.eventbus.peers.events.GenericResponseEvent;
@@ -22,6 +39,8 @@ import net.segoia.event.eventbus.streaming.events.StartStreamRequest;
 import net.segoia.event.eventbus.streaming.events.StartStreamRequestEvent;
 import net.segoia.event.eventbus.streaming.events.StreamInfo;
 import net.segoia.event.eventbus.streaming.events.StreamPacketEvent;
+import net.segoia.ogeg.services.storage.events.CreateFolderRequest;
+import net.segoia.ogeg.services.storage.events.CreateFolderRequestEvent;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequest;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequestEvent;
 import net.segoia.ogeg.services.storage.events.StorageDownloadRequest;
@@ -32,6 +51,7 @@ import net.segoia.ogeg.services.storage.events.StorageEntitiesListDataEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadRequestEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadResponse;
 import net.segoia.util.data.storage.DataStore;
+import net.segoia.util.data.storage.Storage;
 import net.segoia.util.data.storage.StorageEntity;
 import net.segoia.util.data.storage.StorageEntityInfo;
 import net.segoia.util.data.storage.StorageException;
@@ -93,6 +113,11 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	/* delete request */
 	context.addEventHandler(StorageEntitiesDeleteRequestEvent.class, (c) -> {
 	    handleDeleteRequest(c);
+	});
+	
+	/* create folder */
+	context.addEventHandler(CreateFolderRequestEvent.class, (c) ->{
+	    handleFolderCreateRequest(c);
 	});
 
     }
@@ -321,6 +346,42 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
     public void handleStreamEnd(CustomEventContext<EndStreamEvent> c) {
 	streamsManager.processEvent(c);
     }
+    
+    private boolean testStorageKeyIsValid(String key, Event triggerEvent) {
+	/* get the path for the key */
+	DataStore mainDataStore = agentContext.getMainDataStore();
+	String[] storagePath = mainDataStore.extractHierarchy(key);
+	
+	String peerId = triggerEvent.from();
+
+	/* test that the storage path depth is not exceeded */
+	if (storagePath.length > config.getMaxStorageDepth()) {
+	   
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+		    StorageManagerConstants.STORAGE_PATH_DEPTH_EXCEEDED), peerId);
+	    return false;
+	}
+
+	/* get the leaf key name */
+	String leafKey = storagePath[storagePath.length - 1];
+
+	/* test that the name does not exceed max key length */
+
+	if (leafKey.length() > config.getMaxKeyLength()) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+		    StorageManagerConstants.STORAGE_KEY_TOO_LONG), peerId);
+	    return false;
+	}
+
+	/* if the file exists, send error */
+	if (mainDataStore.exists(key)) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+		    StorageManagerConstants.STORAGE_ENTITY_EXISTS), peerId);
+	    return false;
+	}
+	
+	return true;
+    }
 
     public void handleDeleteRequest(CustomEventContext<StorageEntitiesDeleteRequestEvent> c) {
 	StorageEntitiesDeleteRequestEvent event = c.getEvent();
@@ -376,6 +437,65 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	
 	context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
 		    StorageManagerConstants.STORAGE_DELETE_SUCCEEDED), peerId);
+    }
+    
+    protected void handleFolderCreateRequest(CustomEventContext<CreateFolderRequestEvent> c) {
+	CreateFolderRequestEvent event = c.getEvent();
+	
+	if(!context.testEventDataPresent(event)) {
+	    return;
+	}
+	
+	CreateFolderRequest data = event.getData();
+	
+	String folderName = data.getFolderName();
+	String path = data.getPath();
+	
+	String peerId = event.from();
+	
+	if(folderName == null || folderName.trim().isEmpty()) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_FOLDER_NAME_MISSING), peerId);
+	    return;
+	}
+	
+	folderName=folderName.trim();
+	
+	if(!folderName.endsWith(Storage.PATH_SEPARATOR_STRING)) {
+	    folderName = folderName+Storage.PATH_SEPARATOR_STRING;
+	}
+	
+	if(path== null) {
+	    path="";
+	}
+	else {
+	    path = path.trim();
+	}
+	
+	if(!path.endsWith(Storage.PATH_SEPARATOR_STRING)) {
+	    path =path+Storage.PATH_SEPARATOR_STRING;
+	}
+	
+	String fullPath = path+folderName;
+	
+	DataStore mainDataStore = agentContext.getMainDataStore();
+	
+	if(!testStorageKeyIsValid(fullPath,event)) {
+	    return;
+	}
+	
+	try {
+	    Storage createdStorage = mainDataStore.createStorage(fullPath);
+	    
+	    context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_FOLDER_CREATION_SUCCEEDED), peerId);
+	}
+	catch(Exception e) {
+	    e.printStackTrace();
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_FOLDER_CREATION_ERROR), peerId);
+	    return;
+	}
     }
 
 }
