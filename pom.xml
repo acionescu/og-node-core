@@ -49,36 +49,34 @@
 <!--                      net.segoia.event.eventbus.annotations.processors.EventDataAnnotationProcessor  -->
 <!--                   </annotationProcessor> -->
 <!--                </annotationProcessors> -->
-
-<executions>
-        <execution>
-            <id>process-annotations</id>
-            <phase>generate-sources</phase>
-            <goals>
-                <goal>compile</goal>
-            </goals>
-            <configuration>
-                <compilerArgs>
-                    <arg>-proc:only</arg>
-                    <arg>-processor</arg>
-                    <arg>net.segoia.event.eventbus.annotations.processors.EventDataAnnotationProcessor</arg>
-                </compilerArgs>
-            </configuration>
-        </execution>
-        <execution>
-            <id>default-compile</id> <!-- using an id of default-compile will override the default execution -->
-            <phase>compile</phase>
-            <goals>
-                <goal>compile</goal>
-            </goals>
-            <configuration>
-                <compilerArgs>
-                    <arg>-proc:none</arg>
-                </compilerArgs>
-            </configuration>
-        </execution>
-    </executions>
-
+               <executions>
+                  <execution>
+                     <id>process-annotations</id>
+                     <phase>generate-sources</phase>
+                     <goals>
+                        <goal>compile</goal>
+                     </goals>
+                     <configuration>
+                        <compilerArgs>
+                           <arg>-proc:only</arg>
+                           <arg>-processor</arg>
+                           <arg>net.segoia.event.eventbus.annotations.processors.EventDataAnnotationProcessor</arg>
+                        </compilerArgs>
+                     </configuration>
+                  </execution>
+                  <execution>
+                     <id>default-compile</id> <!-- using an id of default-compile will override the default execution -->
+                     <phase>compile</phase>
+                     <goals>
+                        <goal>compile</goal>
+                     </goals>
+                     <configuration>
+                        <compilerArgs>
+                           <arg>-proc:none</arg>
+                        </compilerArgs>
+                     </configuration>
+                  </execution>
+               </executions>
             </configuration>
          </plugin>
          <plugin>

@@ -16,6 +16,8 @@
  */
 package net.segoia.ogeg.services.storage.events;
 
+import net.segoia.util.data.storage.StorageFilterData;
+
 public class ListStorageEntitiesRequest {
     /**
      * The path to list
@@ -31,6 +33,11 @@ public class ListStorageEntitiesRequest {
      * The maximum size of the response
      */
     private int limit;
+
+    /**
+     * Filter conditions
+     */
+    private StorageFilterData filterData;
 
     public ListStorageEntitiesRequest(String path) {
 	super();
@@ -72,4 +79,13 @@ public class ListStorageEntitiesRequest {
     public void setLimit(int limit) {
 	this.limit = limit;
     }
+
+    public StorageFilterData getFilterData() {
+	return filterData;
+    }
+
+    public void setFilterData(StorageFilterData filterData) {
+	this.filterData = filterData;
+    }
+
 }

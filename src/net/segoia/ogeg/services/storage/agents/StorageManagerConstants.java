@@ -61,9 +61,9 @@ public class StorageManagerConstants {
     
     /* delete */
     
-    public static final RejectionReason STORAGE_DELETE_PATH_MISSING=new RejectionReason(6008, "Storage delete path is missing");
-    public static final RejectionReason STORAGE_DELETE_FORBIDDEN=new RejectionReason(6009, "Storage delete forbidden");
-    public static final RejectionReason STORAGE_DELETE_FAILED=new RejectionReason(6010, "Storage delete failed");
+    public static final RejectionReason STORAGE_DELETE_PATH_MISSING=new RejectionReason(6021, "Storage delete path is missing");
+    public static final RejectionReason STORAGE_DELETE_FORBIDDEN=new RejectionReason(6022, "Storage delete forbidden");
+    public static final RejectionReason STORAGE_DELETE_FAILED=new RejectionReason(6023, "Storage delete failed");
     
     
     public static final GenericResponseData STORAGE_DELETE_SUCCEEDED=new GenericResponseData(6020, "Delete succeeded");
@@ -72,6 +72,25 @@ public class StorageManagerConstants {
     public static final RejectionReason STORAGE_FOLDER_CREATION_ERROR=new RejectionReason(6032, "Invalid folder name or path");
     
     public static final GenericResponseData STORAGE_FOLDER_CREATION_SUCCEEDED=new GenericResponseData(6030, "Folder created");
+    
+    
+    /* move */
+    
+    public static final RejectionReason STORAGE_SOURCE_PATHS_MISSING=new RejectionReason(6041, "Storage source paths missing");
+    public static final RejectionReason STORAGE_SOURCE_PATH_INVALID=new RejectionReason(6042, "Storage source path invalid");
+    
+    public static final RejectionReason STORAGE_DESTINATION_PATH_MISSING=new RejectionReason(6043, "Storage destination path missing");
+    public static final RejectionReason STORAGE_DESTINATION_PATH_INVALID=new RejectionReason(6044, "Storage destination path invalid");
+    public static final RejectionReason STORAGE_MOVE_FAILED=new RejectionReason(6045, "Storage move failed");
+    public static final RejectionReason STORAGE_MOVE_FORBIDDEN=new RejectionReason(6046, "Storage move forbidden");
+    public static final GenericResponseData STORAGE_MOVE_SUCCEEDED=new GenericResponseData(6040, "Move suceeded");
+    
+    
+    /* rename */
+    public static final GenericResponseData STORAGE_RENAME_SUCCEEDED=new GenericResponseData(6050, "Rename suceeded");
+    public static final RejectionReason STORAGE_RENAME_FAILED=new RejectionReason(6051, "Rename failed");
+    public static final RejectionReason STORAGE_RENAME_FORBIDDEN=new RejectionReason(6052, "Storage rename forbidden");
+    
     
     public static final StorageErrorEvent buildStorageErrorEvent(String eventType, ErrorData reason) {
 	return new StorageErrorEvent(new GenericErrorResponse(eventType, reason));

@@ -48,13 +48,20 @@ import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequest;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequestEvent;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesListData;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesListDataEvent;
+import net.segoia.ogeg.services.storage.events.StorageMoveEntitiesRequest;
+import net.segoia.ogeg.services.storage.events.StorageMoveEntitiesRequestEvent;
+import net.segoia.ogeg.services.storage.events.StorageRenameEntityRequest;
+import net.segoia.ogeg.services.storage.events.StorageRenameEntityRequestEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadRequestEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadResponse;
 import net.segoia.util.data.storage.DataStore;
+import net.segoia.util.data.storage.GenericStorageFilter;
 import net.segoia.util.data.storage.Storage;
 import net.segoia.util.data.storage.StorageEntity;
 import net.segoia.util.data.storage.StorageEntityInfo;
 import net.segoia.util.data.storage.StorageException;
+import net.segoia.util.data.storage.StorageFilter;
+import net.segoia.util.data.storage.StorageFilterData;
 
 public class StorageManagerAgent extends GlobalEventNodeAgent {
     private StorageManagerAgentConfig config = new StorageManagerAgentConfig();
@@ -114,10 +121,20 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	context.addEventHandler(StorageEntitiesDeleteRequestEvent.class, (c) -> {
 	    handleDeleteRequest(c);
 	});
-	
+
 	/* create folder */
-	context.addEventHandler(CreateFolderRequestEvent.class, (c) ->{
+	context.addEventHandler(CreateFolderRequestEvent.class, (c) -> {
 	    handleFolderCreateRequest(c);
+	});
+
+	/* move entities */
+	context.addEventHandler(StorageMoveEntitiesRequestEvent.class, (c) -> {
+	    handleMoveRequest(c);
+	});
+
+	/* rename entity */
+	context.addEventHandler(StorageRenameEntityRequestEvent.class, (c) -> {
+	    handleRenameRequest(c);
 	});
 
     }
@@ -175,14 +192,15 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    return;
 	}
 	PeerStreamEndedData data = event.getData();
-	
-	if(data.getReason().getCode() == 0) {
+
+	if (data.getReason().getCode() == 0) {
 	    /* if ended successfully, send a notification */
-	    GenericResponseEvent sev = StorageManagerConstants.buildStorageSuccessEvent(EndStreamEvent.ET, StorageManagerConstants.STORAGE_UPLOAD_SUCCEEDED);
+	    GenericResponseEvent sev = StorageManagerConstants.buildStorageSuccessEvent(EndStreamEvent.ET,
+		    StorageManagerConstants.STORAGE_UPLOAD_SUCCEEDED);
 	    sev.addParam("streamSessionId", data.getPeerStreamData().getStreamData().getStreamSessionId());
 	    context.forwardTo(sev, data.getPeerStreamData().getSourcePeerId());
-	    
-	    return;	    
+
+	    return;
 	}
 
 	if (data.getReason().getCode() != StreamConstants.PEER_LEFT.getCode()) {
@@ -219,10 +237,12 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	/* if the path is empty use main data store, otherwise get the datastore indicated by the path */
 	DataStore targetDataStore = agentContext.getMainDataStore();
 
+	String standardPath = Storage.PATH_SEPARATOR_STRING;
 	String peerId = event.from();
 	if (path != null && !path.isEmpty()) {
 
 	    try {
+		standardPath = targetDataStore.getRelativePath(path);
 		targetDataStore = (DataStore) targetDataStore.getStorage(path);
 	    } catch (StorageException e) {
 		/* send an invalid path error */
@@ -231,12 +251,19 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    }
 	}
 
-	StorageEntityInfo[] entitiesArray = targetDataStore.listEntities();
-	System.out.println("entities for path " + entitiesArray);
+	StorageFilter filter = null;
+
+	StorageFilterData filterData = data.getFilterData();
+	if (filterData != null) {
+	    filter = new GenericStorageFilter(filterData);
+	}
+
+	StorageEntityInfo[] entitiesArray = targetDataStore.listEntities(filter);
+	System.out.println("standardPath " + standardPath);
 	// TODO check list conditions for each entities
 
 	StorageEntitiesListDataEvent responseEvent = new StorageEntitiesListDataEvent(
-		new StorageEntitiesListData(path, Arrays.asList(entitiesArray), entitiesArray.length));
+		new StorageEntitiesListData(standardPath, Arrays.asList(entitiesArray), entitiesArray.length));
 
 	context.forwardTo(responseEvent, peerId);
 
@@ -346,40 +373,55 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
     public void handleStreamEnd(CustomEventContext<EndStreamEvent> c) {
 	streamsManager.processEvent(c);
     }
-    
-    private boolean testStorageKeyIsValid(String key, Event triggerEvent) {
+
+    /**
+     * 
+     * @param key
+     * @param triggerEvent
+     * @param existenceFlag
+     *            - if true, will test that the file exists, if false, will test that the file doesn't exist
+     * @return
+     */
+    private boolean testStorageKeyIsValid(String key, Event triggerEvent, boolean existenceFlag) {
 	/* get the path for the key */
 	DataStore mainDataStore = agentContext.getMainDataStore();
 	String[] storagePath = mainDataStore.extractHierarchy(key);
-	
+
 	String peerId = triggerEvent.from();
 
 	/* test that the storage path depth is not exceeded */
 	if (storagePath.length > config.getMaxStorageDepth()) {
-	   
+
 	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
 		    StorageManagerConstants.STORAGE_PATH_DEPTH_EXCEEDED), peerId);
 	    return false;
 	}
 
-	/* get the leaf key name */
-	String leafKey = storagePath[storagePath.length - 1];
+	if (storagePath.length > 0) {
+	    /* get the leaf key name */
+	    String leafKey = storagePath[storagePath.length - 1];
 
-	/* test that the name does not exceed max key length */
+	    /* test that the name does not exceed max key length */
 
-	if (leafKey.length() > config.getMaxKeyLength()) {
-	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
-		    StorageManagerConstants.STORAGE_KEY_TOO_LONG), peerId);
-	    return false;
+	    if (leafKey.length() > config.getMaxKeyLength()) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+			StorageManagerConstants.STORAGE_KEY_TOO_LONG), peerId);
+		return false;
+	    }
 	}
 
 	/* if the file exists, send error */
-	if (mainDataStore.exists(key)) {
-	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
-		    StorageManagerConstants.STORAGE_ENTITY_EXISTS), peerId);
+	if (mainDataStore.exists(key) != existenceFlag) {
+	    if (!existenceFlag) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+			StorageManagerConstants.STORAGE_ENTITY_EXISTS), peerId);
+	    } else {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+			StorageManagerConstants.STORAGE_PATH_INVALID), peerId);
+	    }
 	    return false;
 	}
-	
+
 	return true;
     }
 
@@ -412,13 +454,14 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 		try {
 		    String relPath = mainDataStore.getRelativePath(path);
 		    for (DataStoreContext dsc : dataStoreContexts.values()) {
-			if(relPath.equals(dsc.getRelativePath())) {
+			if (relPath.equals(dsc.getRelativePath())) {
 			    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
 				    StorageManagerConstants.STORAGE_DELETE_FORBIDDEN), peerId);
 			    return;
 			}
 		    }
 		} catch (StorageException e) {
+		    e.printStackTrace();
 		    context.forwardTo(StorageManagerConstants.buildPathInvalidErrorEvent(event.getEt()), peerId);
 		    return;
 		}
@@ -428,74 +471,213 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 
 	for (String path : paths) {
 	    boolean deleted = mainDataStore.delete(path);
-	    if(!deleted) {
-		 context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
-			    StorageManagerConstants.STORAGE_DELETE_FAILED), peerId);
-		    return;
+	    if (!deleted) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			StorageManagerConstants.STORAGE_DELETE_FAILED), peerId);
+		return;
 	    }
 	}
-	
+
 	context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
-		    StorageManagerConstants.STORAGE_DELETE_SUCCEEDED), peerId);
+		StorageManagerConstants.STORAGE_DELETE_SUCCEEDED), peerId);
     }
-    
+
     protected void handleFolderCreateRequest(CustomEventContext<CreateFolderRequestEvent> c) {
 	CreateFolderRequestEvent event = c.getEvent();
-	
-	if(!context.testEventDataPresent(event)) {
+
+	if (!context.testEventDataPresent(event)) {
 	    return;
 	}
-	
+
 	CreateFolderRequest data = event.getData();
-	
+
 	String folderName = data.getFolderName();
 	String path = data.getPath();
-	
+
 	String peerId = event.from();
-	
-	if(folderName == null || folderName.trim().isEmpty()) {
+
+	if (folderName == null || folderName.trim().isEmpty()) {
 	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
 		    StorageManagerConstants.STORAGE_FOLDER_NAME_MISSING), peerId);
 	    return;
 	}
-	
-	folderName=folderName.trim();
-	
-	if(!folderName.endsWith(Storage.PATH_SEPARATOR_STRING)) {
-	    folderName = folderName+Storage.PATH_SEPARATOR_STRING;
+
+	folderName = folderName.trim();
+
+	if (!folderName.endsWith(Storage.PATH_SEPARATOR_STRING)) {
+	    folderName = folderName + Storage.PATH_SEPARATOR_STRING;
 	}
-	
-	if(path== null) {
-	    path="";
-	}
-	else {
+
+	if (path == null) {
+	    path = "";
+	} else {
 	    path = path.trim();
 	}
-	
-	if(!path.endsWith(Storage.PATH_SEPARATOR_STRING)) {
-	    path =path+Storage.PATH_SEPARATOR_STRING;
+
+	if (!path.endsWith(Storage.PATH_SEPARATOR_STRING)) {
+	    path = path + Storage.PATH_SEPARATOR_STRING;
 	}
-	
-	String fullPath = path+folderName;
-	
+
+	String fullPath = path + folderName;
+
 	DataStore mainDataStore = agentContext.getMainDataStore();
-	
-	if(!testStorageKeyIsValid(fullPath,event)) {
+
+	if (!testStorageKeyIsValid(fullPath, event, false)) {
 	    return;
 	}
-	
+
 	try {
 	    Storage createdStorage = mainDataStore.createStorage(fullPath);
-	    
+
 	    context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
 		    StorageManagerConstants.STORAGE_FOLDER_CREATION_SUCCEEDED), peerId);
-	}
-	catch(Exception e) {
+	} catch (Exception e) {
 	    e.printStackTrace();
 	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
 		    StorageManagerConstants.STORAGE_FOLDER_CREATION_ERROR), peerId);
 	    return;
 	}
+    }
+
+    protected void handleMoveRequest(CustomEventContext<StorageMoveEntitiesRequestEvent> c) {
+	StorageMoveEntitiesRequestEvent event = c.getEvent();
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+
+	StorageMoveEntitiesRequest data = event.getData();
+
+	String peerId = event.from();
+
+	List<String> sourcePaths = data.getSourcePaths();
+
+	if (sourcePaths == null || sourcePaths.size() == 0) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_SOURCE_PATHS_MISSING), peerId);
+	    return;
+	}
+
+	String destinationPath = data.getDestinationPath();
+
+	if (destinationPath == null || destinationPath.isEmpty()) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_DESTINATION_PATH_MISSING), peerId);
+	    return;
+	}
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+
+	/* test that source paths are valid */
+	for (String sp : sourcePaths) {
+	    if (!testStorageKeyIsValid(sp, event, true)) {
+		return;
+	    }
+	    String sourceRelativePath = Storage.PATH_SEPARATOR_STRING;
+	    try {
+		sourceRelativePath = mainDataStore.getRelativePath(sp);
+	    } catch (StorageException e) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			StorageManagerConstants.STORAGE_PATH_INVALID), peerId);
+		return;
+	    }
+	    /* test this is not a predefined folder */
+	    for (DataStoreContext dsc : agentContext.getDataStoreContexts().values()) {
+		if (dsc.getRelativePath().equals(sourceRelativePath)) {
+		    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			    StorageManagerConstants.STORAGE_MOVE_FORBIDDEN), peerId);
+		    return;
+		}
+	    }
+	}
+
+	/* test destination path */
+	if (!testStorageKeyIsValid(destinationPath, event, true)) {
+	    return;
+	}
+
+	for (String sp : sourcePaths) {
+	    try {
+		mainDataStore.move(sp, destinationPath);
+	    } catch (StorageException e) {
+		e.printStackTrace();
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			StorageManagerConstants.STORAGE_MOVE_FAILED), peerId);
+		return;
+	    }
+	}
+
+	context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
+		StorageManagerConstants.STORAGE_MOVE_SUCCEEDED), peerId);
+    }
+
+    protected void handleRenameRequest(CustomEventContext<StorageRenameEntityRequestEvent> c) {
+	StorageRenameEntityRequestEvent event = c.getEvent();
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+
+	StorageRenameEntityRequest data = event.getData();
+
+	String sourcePath = data.getSourcePath();
+	String peerId = event.from();
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+
+	if (sourcePath == null || sourcePath.isEmpty()) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_SOURCE_PATH_INVALID), peerId);
+	    return;
+	}
+
+	String sourceRelativePath = Storage.PATH_SEPARATOR_STRING;
+	try {
+	    sourceRelativePath = mainDataStore.getRelativePath(sourcePath);
+	} catch (StorageException e1) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_SOURCE_PATH_INVALID), peerId);
+	    return;
+	}
+
+	if (Storage.PATH_SEPARATOR_STRING.equals(sourceRelativePath)) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_RENAME_FORBIDDEN), peerId);
+	    return;
+	}
+
+	String newName = data.getNewName();
+	if (newName == null || newName.isEmpty()) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_DESTINATION_PATH_INVALID), peerId);
+	    return;
+	}
+
+	/* test this is not a predefined folder */
+	for (DataStoreContext dsc : agentContext.getDataStoreContexts().values()) {
+	    if (dsc.getRelativePath().equals(sourceRelativePath)) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			StorageManagerConstants.STORAGE_RENAME_FORBIDDEN), peerId);
+		return;
+	    }
+	}
+
+	if (!testStorageKeyIsValid(sourcePath, event, true)) {
+	    return;
+	}
+
+	try {
+
+	    mainDataStore.rename(sourcePath, newName);
+	} catch (StorageException e) {
+	    e.printStackTrace();
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_RENAME_FAILED), peerId);
+	    return;
+	}
+
+	context.forwardTo(StorageManagerConstants.buildStorageSuccessEvent(event.getEt(),
+		StorageManagerConstants.STORAGE_RENAME_SUCCEEDED), peerId);
     }
 
 }
