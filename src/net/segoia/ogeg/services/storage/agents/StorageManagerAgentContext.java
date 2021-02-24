@@ -16,8 +16,11 @@
  */
 package net.segoia.ogeg.services.storage.agents;
 
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import net.segoia.util.data.storage.DataStore;
 import net.segoia.util.data.storage.DataStoreMetadata;
@@ -36,7 +39,12 @@ public class StorageManagerAgentContext {
     private Map<String, DataStore> dataStores;
 
     private Map<String, DataStoreContext> dataStoreContexts;
-
+    
+    /**
+     * Documents that are currently being edited
+     */
+    private Map<String, DocEditContext> editingDocs=new HashMap<>();
+    
     public StorageManagerAgentContext(StorageManagerAgentConfig agentConfig) {
 	super();
 	this.agentConfig = agentConfig;
@@ -88,6 +96,41 @@ public class StorageManagerAgentContext {
 	    System.out.println("creating datastore " + v.getKey());
 	});
     }
+    
+    public void addEditingDoc(String key, DocEditContext docContext) {
+	editingDocs.put(key, docContext);
+    }
+    
+    public DocEditContext getEditingDoc(String key) {
+	return editingDocs.get(key);
+    }
+    
+    public DocEditContext removeEditingDoc(String key) {
+	return editingDocs.remove(key);
+    }
+    
+    
+    public DocEditPeerContext removePeerFromDoc(String peerId, String docKey) {
+	DocEditContext docEditContext = editingDocs.get(docKey);
+	if(docEditContext != null) {
+	    return docEditContext.removePeer(peerId);
+	}
+	return null;
+    }
+    
+    public Collection<String> removePeerFromAllDocs(String peerId) {
+	Set<String> removedFrom = new HashSet<>();
+	for(String docKey : editingDocs.keySet()) {
+	    DocEditContext docEditContext = editingDocs.get(docKey);
+	    if(docEditContext.hasPeer(peerId)) {
+		
+		    /* just remove the peer */
+		    docEditContext.removePeer(peerId);
+		    removedFrom.add(docKey);
+	    }
+	}
+	return removedFrom;
+    }
 
     public DataStore getDataStoreForId(String id) {
 	return dataStores.get(id);
@@ -120,5 +163,11 @@ public class StorageManagerAgentContext {
     public Map<String, DataStoreContext> getDataStoreContexts() {
 	return dataStoreContexts;
     }
+
+    public Map<String, DocEditContext> getEditingDocs() {
+        return editingDocs;
+    }
+    
+    
 
 }

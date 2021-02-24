@@ -41,6 +41,11 @@ public class StorageManagerAgentConfig {
      * Maximum characters length of a key
      */
     private int maxKeyLength=100;
+    
+    /**
+     * The interval, in ms,  for editing doc autosave
+     */
+    private int docAutosaveInterval=60000;
 
     /**
      * The main datastores that this agent manages
@@ -86,6 +91,12 @@ public class StorageManagerAgentConfig {
     public void setMaxKeyLength(int maxKeyLength) {
         this.maxKeyLength = maxKeyLength;
     }
-    
-    
+
+    public int getDocAutosaveInterval() {
+        return docAutosaveInterval;
+    }
+
+    public void setDocAutosaveInterval(int docAutosaveInterval) {
+        this.docAutosaveInterval = docAutosaveInterval;
+    }
 }

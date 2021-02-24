@@ -16,16 +16,21 @@
  */
 package net.segoia.ogeg.services.storage.agents;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import net.segoia.event.eventbus.CustomEventContext;
 import net.segoia.event.eventbus.Event;
 import net.segoia.event.eventbus.app.EventNodeControllerContext;
 import net.segoia.event.eventbus.peers.GlobalEventNodeAgent;
 import net.segoia.event.eventbus.peers.events.GenericResponseEvent;
+import net.segoia.event.eventbus.peers.events.PeerLeftEvent;
+import net.segoia.event.eventbus.peers.vo.PeerInfo;
 import net.segoia.event.eventbus.streaming.CustomStreamControllerContext;
 import net.segoia.event.eventbus.streaming.StreamConstants;
 import net.segoia.event.eventbus.streaming.StreamsManager;
@@ -39,10 +44,19 @@ import net.segoia.event.eventbus.streaming.events.StartStreamRequest;
 import net.segoia.event.eventbus.streaming.events.StartStreamRequestEvent;
 import net.segoia.event.eventbus.streaming.events.StreamInfo;
 import net.segoia.event.eventbus.streaming.events.StreamPacketEvent;
+import net.segoia.ogeg.services.chat.events.ChatPeerData;
 import net.segoia.ogeg.services.storage.events.CreateFolderRequest;
 import net.segoia.ogeg.services.storage.events.CreateFolderRequestEvent;
+import net.segoia.ogeg.services.storage.events.DocClosedData;
+import net.segoia.ogeg.services.storage.events.DocSaveData;
+import net.segoia.ogeg.services.storage.events.DocSaveEvent;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequest;
 import net.segoia.ogeg.services.storage.events.ListStorageEntitiesRequestEvent;
+import net.segoia.ogeg.services.storage.events.PeerDocClosedEvent;
+import net.segoia.ogeg.services.storage.events.PeerDocOpenData;
+import net.segoia.ogeg.services.storage.events.PeerDocOpenedEvent;
+import net.segoia.ogeg.services.storage.events.StorageDocChangeData;
+import net.segoia.ogeg.services.storage.events.StorageDocChangeDataEvent;
 import net.segoia.ogeg.services.storage.events.StorageDownloadRequest;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequest;
 import net.segoia.ogeg.services.storage.events.StorageEntitiesDeleteRequestEvent;
@@ -52,6 +66,10 @@ import net.segoia.ogeg.services.storage.events.StorageMoveEntitiesRequest;
 import net.segoia.ogeg.services.storage.events.StorageMoveEntitiesRequestEvent;
 import net.segoia.ogeg.services.storage.events.StorageRenameEntityRequest;
 import net.segoia.ogeg.services.storage.events.StorageRenameEntityRequestEvent;
+import net.segoia.ogeg.services.storage.events.StorageStartDocEditAck;
+import net.segoia.ogeg.services.storage.events.StorageStartDocEditAckEvent;
+import net.segoia.ogeg.services.storage.events.StorageStartDocEditRequest;
+import net.segoia.ogeg.services.storage.events.StorageStartDocEditRequestEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadRequestEvent;
 import net.segoia.ogeg.services.storage.events.SyncStorageDownloadResponse;
 import net.segoia.util.data.storage.DataStore;
@@ -137,6 +155,87 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	    handleRenameRequest(c);
 	});
 
+	/* doc editing */
+	context.addEventHandler(StorageStartDocEditRequestEvent.class, (c) -> {
+	    handleOpenSharedDocRequest(c);
+	});
+
+	context.addEventHandler(StorageDocChangeDataEvent.class, (c) -> {
+	    handleDocChanged(c);
+	});
+
+	context.addEventHandler(PeerLeftEvent.class, (c) -> {
+	    handlePeerLeft(c);
+	});
+
+	/* doc save */
+	context.addEventHandler(DocSaveEvent.class, (c) -> {
+	    handleDocSaveEvent(c);
+	});
+	
+	context.addEventHandler(PeerDocClosedEvent.class, (c) -> {
+	    handlePeerClosedDoc(c);
+	});
+
+    }
+
+    protected void handlePeerLeft(CustomEventContext<PeerLeftEvent> c) {
+	PeerLeftEvent event = c.getEvent();
+	PeerInfo peerInfo = event.getData();
+
+	String peerId = peerInfo.getPeerId();
+
+	/* remove this peer from the docs currently enditing */
+	Collection<String> removedFrom = agentContext.removePeerFromAllDocs(peerId);
+
+	/* check if the docs have remainging peers */
+	for (String docKey : removedFrom) {
+	    handlePeerClosedDoc(docKey, peerId);
+	}
+
+    }
+    
+    protected void handlePeerClosedDoc(CustomEventContext<PeerDocClosedEvent> c) {
+	PeerDocClosedEvent event = c.getEvent();
+	if(context.isEventLocal(event)) {
+	    /* discard local events */
+	    return;
+	}
+	
+	if(!context.testEventDataPresent(event)) {
+	    return;
+	}
+	
+	DocClosedData data = event.getData();
+	String peerId = event.from();
+	String docKey = data.getDocKey();
+	
+	DocEditPeerContext docContext = agentContext.removePeerFromDoc(peerId, docKey);
+	context.debug("Removing peer "+peerId + " from doc "+docKey +" -> "+docContext);
+	if(docContext == null) {
+	    /* nothing to do */
+	    return;
+	}
+	handlePeerClosedDoc(docKey, peerId);
+    }
+
+    protected void handlePeerClosedDoc(String docKey, String peerId) {
+	context.logDebug("Hande peer close doct "+docKey);
+	DocEditContext editingDoc = agentContext.getEditingDoc(docKey);
+	Map<String, DocEditPeerContext> editingPeers = editingDoc.getPeers();
+	if (editingPeers.size() == 0) {
+	    /* remove this doc */
+	    agentContext.removeEditingDoc(docKey);
+	    /* post a save event */
+	    SharedDocEditor docEditor = editingDoc.getEditor();
+	    if (docEditor.hasChanged()) {
+		context.postEvent(
+			new DocSaveEvent(new DocSaveData(agentContext.getMainDataStore().getId(), docKey, docEditor)));
+	    }
+	} else {
+	    /* send a doc closed event to peers */
+	    context.forwardTo(new PeerDocClosedEvent(new DocClosedData(docKey, peerId)), editingPeers.keySet());
+	}
     }
 
     protected void handleSyncDownloadRequest(CustomEventContext<SyncStorageDownloadRequestEvent> c) {
@@ -153,6 +252,23 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	;
 
 	StorageDownloadRequest data = event.getData();
+	boolean edit = false;
+	Object editParam = event.getParam("edit");
+	if (editParam != null) {
+	    String editStr = null;
+	    if (editParam instanceof String[]) {
+		String[] editParamArray = ((String[]) editParam);
+		if (editParamArray.length > 0) {
+		    editStr = editParamArray[0];
+		}
+	    } else {
+		editStr = editParam.toString();
+	    }
+
+	    if ("true".equals(editStr)) {
+		edit = true;
+	    }
+	}
 
 	List<String> paths = data.getPaths();
 
@@ -167,7 +283,18 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 	DataStore mainDataStore = agentContext.getMainDataStore();
 	for (String path : paths) {
 	    try {
-		StorageEntity se = mainDataStore.getStorageEntity(path);
+		StorageEntity se = null;
+		if (edit) {
+		    /* see if we have an active doc editor for this path */
+		    DocEditContext editingDoc = agentContext.getEditingDoc(path);
+		    if (editingDoc != null) {
+			/* return the editor */
+			se = editingDoc.getEditor();
+		    }
+		}
+		if (se == null) {
+		    se = mainDataStore.getStorageEntity(path);
+		}
 
 		storageEntities.put(path, se);
 	    } catch (Exception e) {
@@ -372,6 +499,35 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 
     public void handleStreamEnd(CustomEventContext<EndStreamEvent> c) {
 	streamsManager.processEvent(c);
+    }
+
+    private boolean testStorageKeyIsValid(String key, Event triggerEvent) {
+	DataStore mainDataStore = agentContext.getMainDataStore();
+	String[] storagePath = mainDataStore.extractHierarchy(key);
+	String peerId = triggerEvent.from();
+
+	/* test that the storage path depth is not exceeded */
+	if (storagePath.length > config.getMaxStorageDepth()) {
+
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+		    StorageManagerConstants.STORAGE_PATH_DEPTH_EXCEEDED), peerId);
+	    return false;
+	}
+
+	if (storagePath.length > 0) {
+	    /* get the leaf key name */
+	    String leafKey = storagePath[storagePath.length - 1];
+
+	    /* test that the name does not exceed max key length */
+
+	    if (leafKey.length() > config.getMaxKeyLength()) {
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(triggerEvent.getEt(),
+			StorageManagerConstants.STORAGE_KEY_TOO_LONG), peerId);
+		return false;
+	    }
+	}
+
+	return true;
     }
 
     /**
@@ -680,4 +836,141 @@ public class StorageManagerAgent extends GlobalEventNodeAgent {
 		StorageManagerConstants.STORAGE_RENAME_SUCCEEDED), peerId);
     }
 
+    protected void handleOpenSharedDocRequest(CustomEventContext<StorageStartDocEditRequestEvent> c) {
+	StorageStartDocEditRequestEvent event = c.getEvent();
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+
+	StorageStartDocEditRequest data = event.getData();
+
+	String docPath = data.getPath();
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+
+	if (!testStorageKeyIsValid(docPath, event)) {
+	    return;
+	}
+
+	String peerId = event.from();
+	String relPath = null;
+	try {
+	    relPath = mainDataStore.getRelativePath(docPath);
+	} catch (StorageException e1) {
+	    context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+		    StorageManagerConstants.STORAGE_PATH_INVALID), peerId);
+	    return;
+	}
+
+	/* see if there's already an editor for this path */
+	DocEditContext docEditingContext = agentContext.getEditingDoc(relPath);
+
+	if (docEditingContext == null) {
+	    /* create an editor and a context for this file */
+	    try {
+		SharedDocEditor sharedDocEditor = new SharedDocEditor(mainDataStore, relPath);
+		docEditingContext = new DocEditContext(relPath, sharedDocEditor);
+		agentContext.addEditingDoc(relPath, docEditingContext);
+
+		/* schedule an autosave event */
+		if (config.getDocAutosaveInterval() > 0) {
+		    context.scheduleEvent(
+			    new DocSaveEvent(new DocSaveData(mainDataStore.getId(), relPath, sharedDocEditor)),
+			    config.getDocAutosaveInterval());
+		}
+
+	    } catch (DocEditException e) {
+		e.printStackTrace();
+		context.forwardTo(StorageManagerConstants.buildStorageErrorEvent(event.getEt(),
+			StorageManagerConstants.DOC_START_EDIT_FAILED), peerId);
+		return;
+	    }
+	}
+
+	Map<String, ChatPeerData> participantsMap = docEditingContext.getChat().getParticipants();
+	ArrayList<ChatPeerData> editingParticipants = new ArrayList(participantsMap.values());
+
+	/* send doc open ack */
+	context.forwardTo(new StorageStartDocEditAckEvent(
+		new StorageStartDocEditAck(relPath, "/download?p=" + relPath + "&edit=true", editingParticipants)),
+		peerId);
+
+	if (participantsMap.size() > 0) {
+	    /* notify other peers about this peer editing the doc */
+	    context.forwardTo(new PeerDocOpenedEvent(new PeerDocOpenData(relPath, peerId)), participantsMap.keySet());
+	}
+	/* add peer to editing peers for this doc */
+	docEditingContext.addPeer(peerId);
+    }
+
+    protected void handleDocChanged(CustomEventContext<StorageDocChangeDataEvent> c) {
+	StorageDocChangeDataEvent event = c.getEvent();
+
+	if (!context.testEventDataPresent(event)) {
+	    return;
+	}
+
+	StorageDocChangeData data = event.getData();
+	String docKey = data.getDocKey();
+
+	/* check if there's a document editor present */
+	DocEditContext editingDoc = agentContext.getEditingDoc(docKey);
+
+	if (editingDoc == null) {
+	    /* discard this */
+	    return;
+	}
+
+	String peerId = event.from();
+
+	Set<String> peers = editingDoc.getPeers().keySet();
+
+	if (!peers.contains(peerId)) {
+	    /* this peer is not currently registered as an editor for this document */
+	    return;
+	}
+
+	if (peers.size() > 1) {
+	    /* forward the doc change notification to other peers currently editing the doc */
+	    context.forwardTo(event, peers, peerId);
+	}
+
+	/* update internal state from this change */
+	editingDoc.getEditor().updateFromChange(data);
+    }
+
+    protected void handleDocSaveEvent(CustomEventContext<DocSaveEvent> c) {
+	DocSaveEvent event = c.getEvent();
+
+	if (!context.isEventLocal(event)) {
+	    /* accept only local events for now */
+	    return;
+	}
+
+	DocSaveData data = event.getData();
+
+	DataStore mainDataStore = agentContext.getMainDataStore();
+	if (!mainDataStore.getId().equals(data.getParentStorageId())) {
+	    /* discard if we're not managing the target storage */
+	    return;
+	}
+
+	/* do save */
+	try {
+	    context.logDebug("Autosave doc " + data.getDocKey());
+	    data.getEntityToSave().save();
+	} catch (StorageException e) {
+	    // TODO Auto-generated catch block
+	    e.printStackTrace();
+	}
+
+	DocEditContext editingDoc = agentContext.getEditingDoc(data.getDocKey());
+	if (editingDoc != null) {
+	    /* if the document is still being edited, schedule a new save event */
+	    if (config.getDocAutosaveInterval() > 0) {
+		context.scheduleEvent(new DocSaveEvent(data), config.getDocAutosaveInterval());
+	    }
+	}
+    }
 }

@@ -5,3 +5,4 @@ target/
 /bin/
 /.apt_generated/
 /gen-sources/
+/gen-sources-test/

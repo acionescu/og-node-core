@@ -91,6 +91,9 @@ public class StorageManagerConstants {
     public static final RejectionReason STORAGE_RENAME_FAILED=new RejectionReason(6051, "Rename failed");
     public static final RejectionReason STORAGE_RENAME_FORBIDDEN=new RejectionReason(6052, "Storage rename forbidden");
     
+    /* doc edit */
+    
+    public static final RejectionReason DOC_START_EDIT_FAILED=new RejectionReason(6061, "Failed to open document for edit.");
     
     public static final StorageErrorEvent buildStorageErrorEvent(String eventType, ErrorData reason) {
 	return new StorageErrorEvent(new GenericErrorResponse(eventType, reason));

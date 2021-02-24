@@ -34,6 +34,7 @@ public class ChatPeerData extends ChatData {
     public ChatPeerData(String chatKey, String peerId) {
 	super(chatKey);
 	this.peerId = peerId;
+	this.alias = peerId;
     }
 
     public ChatPeerData(String chatKey, String peerId, boolean local, String alias) {
